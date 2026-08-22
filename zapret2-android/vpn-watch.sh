@@ -35,6 +35,16 @@ rm -f "$TRIGGER_FILE" "$NETLINK_FIFO" 2>/dev/null
 IP_BIN=$(command -v ip 2>/dev/null); [ -n "$IP_BIN" ] || IP_BIN=/system/bin/ip
 role_snapshot() { "$MODDIR/net-role.sh" role-signature 2>/dev/null; }
 
+# Движок из снимка последнего полного старта службы.
+runtime_engine() {
+  sed -n 's/^STRATEGY_EFFECTIVE="\{0,1\}\([^\"]*\)"\{0,1\}$/\1/p' "$RUN_DIR/tether-runtime.conf" 2>/dev/null | head -n1
+}
+# SMART_NATIVE выбирает стратегию внутри самого nfqws2 (circular по reply-feed):
+# результат автоподбора при этом движке не применяется вообще, а его
+# reload-profile отвергается и выливается в ПОЛНЫЙ перезапуск службы — десятки
+# секунд без обхода после каждой смены сети. Гонять probe впустую незачем.
+auto_select_useful() { [ "$(runtime_engine)" != "SMART_NATIVE" ]; }
+
 EVENT_PID=""
 IPMON_PID=""
 IPMON_READER_PID=""
@@ -162,7 +172,7 @@ while :; do
   role_check_due=0
 
   # Wi-Fi и мобильной сети и не выполняет HTTPS-probe, пока кэш свежий.
-  if [ "$AUTO_SELECT_ENABLED" = 1 ] && [ "$AUTO_PERIODIC_RECHECK" -ge 300 ] 2>/dev/null && \
+  if [ "$AUTO_SELECT_ENABLED" = 1 ] && auto_select_useful && [ "$AUTO_PERIODIC_RECHECK" -ge 300 ] 2>/dev/null && \
      [ $((now - last_auto_check)) -ge "$AUTO_PERIODIC_RECHECK" ] 2>/dev/null; then
     [ -x "$MODDIR/auto-select.sh" ] && sh "$MODDIR/auto-select.sh" schedule >/dev/null 2>&1 || true
     last_auto_check=$now
@@ -208,7 +218,8 @@ while :; do
       need_apply=1
       # События уже объединены debounce. AUTO будим только после реального
       # изменения сетевой роли/default upstream, а не на каждый vendor event.
-      [ "$AUTO_SELECT_ENABLED" = 1 ] && [ -x "$MODDIR/auto-select.sh" ] && \
+      # При SMART_NATIVE проба бесполезна (см. auto_select_useful).
+      auto_select_useful && [ "$AUTO_SELECT_ENABLED" = 1 ] && [ -x "$MODDIR/auto-select.sh" ] && \
         sh "$MODDIR/auto-select.sh" schedule >/dev/null 2>&1 || true
       [ "${ENABLE_WARP:-0}" = "1" ] && [ -x "$MODDIR/warp-tunnel.sh" ] && \
         sh "$MODDIR/warp-tunnel.sh" sync >/dev/null 2>&1 || true

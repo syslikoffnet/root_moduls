@@ -406,8 +406,49 @@ EOF
 # только то, что иначе не работает вовсе.
 # ------------------------------------------------------------------------------
 resolve_domain_addrs() {
-  local host="$1" family="$2" out=""
+  local host="$1" family="$2" out="" server query answer provider provider_ip provider_host
   case "$host" in ''|*[!A-Za-z0-9.-]*) return 1 ;; esac
+  # Системный DNS на фильтрующих провайдерах часто отравлен (NXDOMAIN или
+  # заглушка), и прежний резолв через ping на них гарантированно падал —
+  # домены просто не попадали в туннель («WARP-домен X не резолвится»).
+  # Теперь: прямой DNS-запрос (mdig собирает/разбирает пакет) к надёжным
+  # резолверам, затем DoH через bundled/системный curl, и только в конце
+  # системный резолвер как последний шанс. Возвращается ОДИН адрес.
+  if [ -x "$BIN_DIR/mdig" ]; then
+    query="$RUN_DIR/.warp-dns-q.$$"; answer="$RUN_DIR/.warp-dns-a.$$"
+    if "$BIN_DIR/mdig" --family="$family" --dns-make-query="$host" > "$query" 2>/dev/null; then
+      for server in 1.1.1.1 8.8.8.8; do
+        : > "$answer" 2>/dev/null
+        if timeout 4 nc -u -q 1 -W 3 "$server" 53 < "$query" > "$answer" 2>/dev/null; then
+          if [ "$family" = 6 ]; then
+            out=$("$BIN_DIR/mdig" --dns-parse-query < "$answer" 2>/dev/null | sed -n '/:/p' | head -n1)
+            case "$out" in *:*) rm -f "$query" "$answer" 2>/dev/null; printf '%s\n' "$out"; return 0 ;; esac
+          else
+            out=$("$BIN_DIR/mdig" --dns-parse-query < "$answer" 2>/dev/null | sed -n '/^[0-9][0-9.]*$/p' | head -n1)
+            case "$out" in [0-9]*.[0-9]*.[0-9]*.[0-9]*) rm -f "$query" "$answer" 2>/dev/null; printf '%s\n' "$out"; return 0 ;; esac
+          fi
+        fi
+      done
+      if command -v curl >/dev/null 2>&1; then
+        for provider in '1.1.1.1|cloudflare-dns.com' '8.8.8.8|dns.google'; do
+          provider_ip=${provider%%|*}; provider_host=${provider##*|}
+          if curl -4 -sS --resolve "$provider_host:443:$provider_ip" --connect-timeout 3 --max-time 7 \
+            -H 'Content-Type: application/dns-message' --data-binary "@$query" \
+            "https://$provider_host/dns-query" -o "$answer" 2>/dev/null; then
+            if [ "$family" = 6 ]; then
+              out=$("$BIN_DIR/mdig" --dns-parse-query < "$answer" 2>/dev/null | sed -n '/:/p' | head -n1)
+              case "$out" in *:*) rm -f "$query" "$answer" 2>/dev/null; printf '%s\n' "$out"; return 0 ;; esac
+            else
+              out=$("$BIN_DIR/mdig" --dns-parse-query < "$answer" 2>/dev/null | sed -n '/^[0-9][0-9.]*$/p' | head -n1)
+              case "$out" in [0-9]*.[0-9]*.[0-9]*.[0-9]*) rm -f "$query" "$answer" 2>/dev/null; printf '%s\n' "$out"; return 0 ;; esac
+            fi
+          fi
+        done
+      fi
+      rm -f "$query" "$answer" 2>/dev/null
+    fi
+  fi
+  # Последний шанс — системный резолвер (на «чистых» сетях работает).
   if [ "$family" = 6 ]; then
     out=$(ping6 -c1 -w1 "$host" 2>/dev/null | sed -n 's/^PING [^(]*(\([0-9a-fA-F:]*\)).*/\1/p' | head -n1)
   else
