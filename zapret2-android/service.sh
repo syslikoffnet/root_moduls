@@ -798,9 +798,12 @@ ensure_watchers() {
     # Наблюдаем за КАТАЛОГАМИ, а не за отдельными файлами: все писатели модуля
     # заменяют файлы атомарно (mv -f tmp file), после чего watch на файле
     # остаётся висеть на удалённом иноде и больше никогда не срабатывает.
-    # Маска wnd = close_write | create | delete; события чтения не подписываем,
-    # иначе каждый разбор списка самим модулем поднимал бы реконсиляцию.
-    WATCH_TARGETS="$MODDIR:wnd $LISTS_DIR:wnd $STRATEGY_DIR:wnd"
+    # Маска wndy = close_write | create | delete | moved_to: y обязателен,
+    # потому что mv внутри каталога порождает именно moved_to, а НЕ create —
+    # без y атомарная замена файла была бы невидима для вотчера. События
+    # чтения не подписываем, иначе каждый разбор списка самим модулем
+    # поднимал бы реконсиляцию.
+    WATCH_TARGETS="$MODDIR:wndy $LISTS_DIR:wndy $STRATEGY_DIR:wndy"
     if command -v inotifyd >/dev/null 2>&1; then
       inotifyd "$MODDIR/on_change.sh" $WATCH_TARGETS 2>/dev/null &
       echo $! > "$WATCHER_PID_FILE"
@@ -928,7 +931,14 @@ stop_pid "$HEALTH_WATCHER_PID_FILE" "health watcher" health-watch
 # перезапуск здесь убивал сервер, обслуживающий запрос, который этот reload и
 # запросил (см. ensure_httpd в конце файла).
 stop_owned_nfqws
-[ -x "$MODDIR/warp-tunnel.sh" ] && sh "$MODDIR/warp-tunnel.sh" stop >/dev/null 2>&1 || true
+# WARP при включённом туннеле тоже НЕ останавливаем на время reload: его цепочки
+# и таблица не зависят от ZAPRET2_*, а финальный старт ниже сам пересоберёт всё
+# через stop_tunnel_internal. Прежний безусловный stop рвал только что поднятый
+# тумблером туннель (гонка warp-toggle → reload) и оставлял завёрнутые в
+# туннель подсети без маршрута на всё время пересборки правил.
+if [ "${ENABLE_WARP:-0}" != "1" ]; then
+  [ -x "$MODDIR/warp-tunnel.sh" ] && sh "$MODDIR/warp-tunnel.sh" stop >/dev/null 2>&1 || true
+fi
 write_start_state "STARTING" "Очистка предыдущих netfilter-правил" 30
 boot_trace "firewall cleanup start"
 cleanup_iptables
@@ -1243,8 +1253,16 @@ log_i "Служба запущена: nfqws2 PID=$nfqws_pid health=$HEALTH"
 
 # Запуск AmneziaWG v3 Cloudflare WARP туннеля для списка приложений
 if [ "${ENABLE_WARP:-0}" = "1" ] && [ -f "$MODDIR/warp-tunnel.sh" ]; then
-  log_i "Запуск точечного туннеля AmneziaWG v3 (WARP)..."
-  sh "$MODDIR/warp-tunnel.sh" start >> "$LOG_FILE" 2>&1 &
+  if ip link show dev "${WARP_DEV:-awg99}" >/dev/null 2>&1; then
+    # Туннель уже поднят: перезапуск сносил бы его (и завёрнутые в него
+    # подсети) на каждый reload службы. Живому туннелю достаточно пересинх-
+    # ронизировать маршруты; сломанный watchdog приведёт в порядок сам.
+    log_i "WARP-туннель уже поднят: синхронизация маршрутов вместо перезапуска"
+    sh "$MODDIR/warp-tunnel.sh" sync >> "$LOG_FILE" 2>&1 &
+  else
+    log_i "Запуск точечного туннеля AmneziaWG v3 (WARP)..."
+    sh "$MODDIR/warp-tunnel.sh" start >> "$LOG_FILE" 2>&1 &
+  fi
 fi
 
 # ------------------------------------------------------------------------------

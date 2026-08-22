@@ -101,27 +101,23 @@ log_e() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] warp: $*" >> "$LOG_FILE";
 # Local UAPI commands must never be able to freeze the adaptive state machine.
 # On some Android builds a stale/broken userspace WireGuard socket can make
 # `awg show/set/syncconf` wait indefinitely. A candidate is skipped instead.
+# Таймер в фоне + wait: команда отдаёт результат сразу по завершении, без
+# гарантированной задержки в секунду на каждый вызов (лаг статуса в WebUI).
 run_with_timeout() {
-  local limit="$1" pid elapsed=0 rc
+  local limit="$1" pid rc watcher
   shift
   case "$limit" in ''|*[!0-9]*) limit=2 ;; esac
   [ "$limit" -ge 1 ] 2>/dev/null || limit=1
   [ "$limit" -le 10 ] 2>/dev/null || limit=10
   "$@" &
   pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$elapsed" -ge "$limit" ] 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      sleep 1
-      kill -9 "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      return 124
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
+  ( sleep "$limit" 2>/dev/null; kill "$pid" 2>/dev/null; sleep 1; kill -9 "$pid" 2>/dev/null ) &
+  watcher=$!
   wait "$pid"
   rc=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  [ "$rc" -eq 143 ] 2>/dev/null && rc=124
   return "$rc"
 }
 
@@ -865,6 +861,46 @@ adapt_state_value() {
   sed -n "s/^${key}=//p" "$WARP_ADAPT_STATE" 2>/dev/null | head -n1
 }
 
+# ------------------------------------------------------------------------------
+# Память последнего РАБОЧЕГО профиля. Раньше любой рестарт туннеля начинал
+# перебор заново с step 0 — минуты радио и перебора после каждой перезагрузки
+# или смены сети, даже когда рабочий профиль был давно найден. Теперь стартуем
+# сразу с последнего удачного шага; полный поиск — только если он тоже не
+# встал (матрица продолжится со следующего шага как обычно).
+# ------------------------------------------------------------------------------
+remember_last_ok() {
+  case "$1" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s\n' "$1" > "$STATE_DIR/warp-lastok.state" 2>/dev/null || true
+  chmod 0600 "$STATE_DIR/warp-lastok.state" 2>/dev/null || true
+}
+initial_adapt_step() {
+  local s
+  s=$(cat "$STATE_DIR/warp-lastok.state" 2>/dev/null)
+  case "$s" in ''|*[!0-9]*) echo 0; return ;; esac
+  if [ "$s" -ge 0 ] 2>/dev/null && [ "$s" -le 39 ] 2>/dev/null; then echo "$s"; else echo 0; fi
+}
+
+# Страна egress туннеля (не чаще раза в час). WARP выходит в ближайшей точке
+# Cloudflare — для РФ это часто Москва, и тогда ГЕО-блоки (Gemini и т.п.)
+# через туннель не откроются, хотя DPI-обход и раздача будут работать.
+# Честно пишем это в лог и в run/warp-egress.cc, вместо молчаливой надежды.
+warp_egress_check() {
+  local now last cc
+  now=$(date +%s 2>/dev/null || echo 0)
+  last=$(cat "$RUN_DIR/warp-egress.ts" 2>/dev/null)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ $((now - last)) -ge 3600 ] 2>/dev/null || return 0
+  date +%s > "$RUN_DIR/warp-egress.ts" 2>/dev/null || true
+  command -v curl >/dev/null 2>&1 || return 0
+  cc=$(curl -s --interface "$DEV" --connect-timeout 3 --max-time 6 https://ipinfo.io/country 2>/dev/null | tr -d '[:space:]')
+  printf '%s\n' "${cc:-unknown}" > "$RUN_DIR/warp-egress.cc" 2>/dev/null || true
+  case "$cc" in
+    RU) log_w "WARP: egress = RU — гео-блоки (сервисы, ушедшие из РФ) через туннель НЕ откроются; обход DPI/замедлений работает" ;;
+    ??|???) log_i "WARP: egress = $cc — гео-блоки должны открываться через туннель" ;;
+  esac
+  return 0
+}
+
 adaptive_profile_count() { echo 5; }
 adaptive_endpoint_count() { echo 4; }
 adaptive_total_steps() { echo 40; }
@@ -1144,7 +1180,11 @@ adaptive_bootstrap() {
   fi
   result=$(adapt_state_value result)
   if [ "$result" = failed ] && ! adapt_retry_due; then return 2; fi
-  if [ "$result" = failed ]; then step=0; else step=$(adapt_state_step); fi
+  if [ "$result" = failed ]; then step=0; else
+    step=$(adapt_state_step)
+    # Свежий старт (файла состояния нет) — начинаем с последнего рабочего шага
+    [ -s "$WARP_ADAPT_STATE" ] || step=$(initial_adapt_step)
+  fi
   # Initial/restart search is already launched in background by service/WebUI.
   # Finish the whole matrix here so the state can become explicitly "failed"
   # instead of depending on a watcher that may be stale or delayed.
@@ -1162,6 +1202,7 @@ adaptive_bootstrap() {
     if apply_candidate "$step"; then
       if probe_handshake "$WARP_PROBE_TIMEOUT"; then
         write_adapt_state "$step" ok || true
+        remember_last_ok "$step"
         log_i "WARP adaptive: handshake OK на step=$step"
         return 0
       fi
@@ -1214,8 +1255,8 @@ start_tunnel() {
   # При ручном режиме значения WebUI должны применяться буквально и больше
   # не перезаписываться адаптивным поиском. При AUTO свежий поиск стартует с step 0.
   if [ "${WARP_ADAPTIVE:-1}" = 1 ]; then
-    [ -f "$WARP_ADAPT_STATE" ] || write_adapt_state 0 pending || true
-    apply_candidate 0 || log_w "WARP adaptive recovery: step=0 не применился; продолжим матрицу"
+    [ -f "$WARP_ADAPT_STATE" ] || write_adapt_state "$(initial_adapt_step)" pending || true
+    apply_candidate "$(initial_adapt_step)" || log_w "WARP adaptive recovery: начальный шаг не применился; продолжим матрицу"
   else
     prepare_manual_profile || { release_warp_lock; return 1; }
   fi
@@ -1433,6 +1474,8 @@ check_and_heal_warp() {
   if warp_tunnel_healthy; then
     step=$(adapt_state_step)
     write_adapt_state "$step" ok || true
+    remember_last_ok "$step"
+    warp_egress_check
     warp_clear_unhealthy
     # Туннель работает. Если маршруты по адресу назначения были сняты на
     # прошлой итерации — возвращаем их. Проверяем именно наличие правил с нашим
@@ -1509,7 +1552,7 @@ check_and_heal_warp() {
   if [ "$result" = failed ]; then
     if ! adapt_retry_due; then release_warp_lock; return 1; fi
     log_w "WARP adaptive: истёк backoff после полного неуспеха, начинаем новый цикл"
-    apply_candidate 0 || { release_warp_lock; return 1; }
+    apply_candidate "$(initial_adapt_step)" || { release_warp_lock; return 1; }
   fi
 
   step=$(adapt_state_step)
@@ -1534,6 +1577,8 @@ check_and_heal_warp() {
     log_w "WARP handshake отсутствует/устарел (${diff}s), проверяем adaptive step=$step"
     if probe_handshake "$WARP_PROBE_TIMEOUT"; then
       write_adapt_state "$step" ok || true
+      remember_last_ok "$step"
+      warp_egress_check
       log_i "WARP adaptive recovery: восстановлен step=$step"
       release_warp_lock
       return 0

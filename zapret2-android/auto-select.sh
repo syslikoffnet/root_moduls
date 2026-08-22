@@ -859,9 +859,19 @@ run_probe() {
   best=""
   best_fixed=0
   best_hosts=""
+  # Лимит числа проверяемых кандидатов за прогон (AUTO_PROBE_MAX_CANDIDATES,
+  # 0 = без ограничения). Раньше настройка была заявлена, но не работала:
+  # полный перебор мог занимать минуты радио-трафика на каждой смене сети.
+  case "$AUTO_PROBE_MAX_CANDIDATES" in ''|*[!0-9]*) AUTO_PROBE_MAX_CANDIDATES=0 ;; esac
+  tried=0
   while IFS='|' read -r number profile path; do
     strategy_read "$profile" || continue
     [ "$STRATEGY_FILE_MODE" = DIRECT ] && continue
+    tried=$((tried + 1))
+    if [ "$AUTO_PROBE_MAX_CANDIDATES" -gt 0 ] 2>/dev/null && [ "$tried" -gt "$AUTO_PROBE_MAX_CANDIDATES" ] 2>/dev/null; then
+      log "AUTO: достигнут лимит кандидатов AUTO_PROBE_MAX_CANDIDATES=$AUTO_PROBE_MAX_CANDIDATES; перебор остановлен"
+      break
+    fi
     log "AUTO candidate=$profile name=$STRATEGY_FILE_NAME position=$number start"
     log_before=$(log_size "$NFQWS_LOG")
     if ! install_candidate_rule "$profile"; then

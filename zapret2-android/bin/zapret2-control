@@ -122,26 +122,25 @@ pid_is_script() {
 }
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g'; }
 
+# Таймаут-обёртка без фиксированного сна: прежний вариант опрашивал процесс
+# циклом с sleep 1, из-за чего каждый статус-запрос WebUI (awg show, ip rule)
+# мог занимать лишнюю 1-2 секунды — это и был главный источник «лагов»
+# интерфейса. Теперь процесс ждётся через wait, а потолок держит фоновый
+# таймер, который при переполнении убивает команду (rc=124).
 run_with_timeout() {
-  local limit="$1" pid elapsed=0 rc
+  local limit="$1" pid rc watcher
   shift
   case "$limit" in ''|*[!0-9]*) limit=2 ;; esac
   [ "$limit" -ge 1 ] 2>/dev/null || limit=1
   "$@" &
   pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$elapsed" -ge "$limit" ] 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      sleep 1
-      kill -9 "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      return 124
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
+  ( sleep "$limit" 2>/dev/null; kill "$pid" 2>/dev/null; sleep 1; kill -9 "$pid" 2>/dev/null ) &
+  watcher=$!
   wait "$pid"
   rc=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  [ "$rc" -eq 143 ] 2>/dev/null && rc=124
   return "$rc"
 }
 

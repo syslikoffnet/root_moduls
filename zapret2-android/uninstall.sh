@@ -70,9 +70,16 @@ del_bounded() {
 del_bounded $IPT -t mangle -D OUTPUT -p tcp --sport "$AUTO_TEST_PORT_MIN:$AUTO_TEST_PORT_MAX" --dport 443 -j NFQUEUE --queue-num "$AUTO_TEST_QNUM" --queue-bypass
 del_bounded $IPT -t mangle -D OUTPUT -p tcp --sport "$AUTO_TEST_PORT_MIN:$AUTO_TEST_PORT_MAX" --dport 443 -j RETURN
 del_bounded $IPT -t mangle -D OUTPUT -m owner --uid-owner 0 -p tcp --dport 443 -j NFQUEUE --queue-num "$AUTO_TEST_QNUM" --queue-bypass
+# Вариант БЕЗ --queue-bypass: на ядрах без queue-bypass именно он остаётся
+# после убитого probe, и NFQUEUE без читателя ДРОПАЕТ root-трафик на 443
+# вплоть до перезагрузки. Раньше uninstall его не снимал.
+del_bounded $IPT -t mangle -D OUTPUT -m owner --uid-owner 0 -p tcp --dport 443 -j NFQUEUE --queue-num "$AUTO_TEST_QNUM"
 del_bounded $IPT -t mangle -D OUTPUT -m owner --uid-owner 0 -p tcp --dport 443 -j RETURN
 del_bounded $IP6T -t mangle -D OUTPUT -m owner --uid-owner 0 -p tcp --dport 443 -j NFQUEUE --queue-num "$AUTO_TEST_QNUM" --queue-bypass
+del_bounded $IP6T -t mangle -D OUTPUT -m owner --uid-owner 0 -p tcp --dport 443 -j NFQUEUE --queue-num "$AUTO_TEST_QNUM"
 del_bounded $IP6T -t mangle -D OUTPUT -m owner --uid-owner 0 -p tcp --dport 443 -j RETURN
+del_bounded $IP6T -t mangle -D OUTPUT -p tcp --sport "$AUTO_TEST_PORT_MIN:$AUTO_TEST_PORT_MAX" --dport 443 -j NFQUEUE --queue-num "$AUTO_TEST_QNUM" --queue-bypass
+del_bounded $IP6T -t mangle -D OUTPUT -p tcp --sport "$AUTO_TEST_PORT_MIN:$AUTO_TEST_PORT_MAX" --dport 443 -j RETURN
 
 # Переходные цепочки от прежних версий модуля, где правила строились по UID.
 # Если та пересборка была прервана, они остались подключёнными к OUTPUT.

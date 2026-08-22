@@ -42,8 +42,10 @@ case "$CHANGED" in
   *.state|*.ts|*.snapshot|*.sorted|*.norm|*.norm.*|*.merge.*|*.fast|*.fast.*|*.previous)
     exit 0 ;;
 esac
-# Реагируем только на завершение записи, создание и удаление.
-case "$EVENTS" in *w*|*n*|*d*|*c*) ;; *) exit 0 ;; esac
+# Реагируем на завершение записи, создание, удаление и ПЕРЕМЕЩЕНИЕ В каталог
+# (y = moved_to: именно так выглядит атомарная замена mv -f tmp file; без y
+# правки конфига/списков «умными» редакторами были бы невидимы).
+case "$EVENTS" in *w*|*n*|*d*|*y*|*c*) ;; *) exit 0 ;; esac
 # Каталог run/ и logs/ не должны вызывать реконсиляцию ни при каких обстоятельствах.
 case "$WATCH_PATH" in "$RUN_DIR"|"$LOG_DIR") exit 0 ;; esac
 
