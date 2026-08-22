@@ -24,6 +24,14 @@ STRATEGY_LIB="$MODDIR/strategy-lib.sh"
 
 mkdir -p "$RUN_DIR" "$STATE_DIR" "$LOG_DIR" 2>/dev/null
 chmod 0700 "$RUN_DIR" "$STATE_DIR" "$LOG_DIR" 2>/dev/null || true
+# curl может отсутствовать в прошивке (Android <= 9 и облегчённые сборки):
+# без него недоступны и весь автоподбор, и проверка кэша. Бандл из bin/ модуля
+# замещает системный curl; статической сборке нужен и CA-бандл, потому что
+# хранилище сертификатов Android OpenSSL не читает.
+if [ -x "$BIN_DIR/curl" ]; then
+  PATH="$BIN_DIR:$PATH"; export PATH
+  [ -f "$BIN_DIR/curl-cacert.pem" ] && { CURL_CA_BUNDLE="$BIN_DIR/curl-cacert.pem"; export CURL_CA_BUNDLE; }
+fi
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 : "${AUTO_SELECT_ENABLED:=1}" "${AUTO_CACHE_TTL:=86400}" "${AUTO_WIFI_CACHE_TTL:=86400}" "${AUTO_CELL_CACHE_TTL:=3600}"
 : "${AUTO_TEST_QNUM:=201}"
@@ -543,8 +551,13 @@ score_against_baseline() {
 # Возвращает в stdout: OK | GEO | DPI
 # ------------------------------------------------------------------------------
 classify_host_block() {
-  local host="$1" iface="$2" code
-  code=$(curl -4 -sS -o /dev/null --interface "$iface" --connect-timeout 4 --max-time 10 \
+  local host="$1" iface="$2" code dns ip resolve_arg
+  # Тот же нюанс статического curl: имя решает mdig, curl получает адрес.
+  # Если резолв не удался — оставляем исходное поведение (попытка по имени).
+  dns=$(snapshot_field "$(active_network_snapshot 2>/dev/null)" 3)
+  ip=$(resolve_host_ipv4 "$iface" "$host" "$dns") || ip=""
+  [ -n "$ip" ] && resolve_arg="--resolve $host:443:$(printf '%s' "$ip" | cut -d, -f1)"
+  code=$(curl -4 -sS -o /dev/null --interface "$iface" $resolve_arg --connect-timeout 4 --max-time 10 \
          -w '%{http_code}' "https://$host/" 2>/dev/null)
   case "$code" in
     2[0-9][0-9]|3[0-9][0-9]) printf 'OK\n'; return 0 ;;
@@ -553,7 +566,7 @@ classify_host_block() {
   # HTTP-ответа не было. Повторяем без проверки сертификата: если теперь ответ
   # есть — значит рукопожатие проходит, но сертификат подменён (DPI). Если сервер
   # при этом отвечает 403/451, решает он сам, и это всё-таки гео-блок.
-  code=$(curl -4 -sS -k -o /dev/null --interface "$iface" --connect-timeout 4 --max-time 10 \
+  code=$(curl -4 -sS -k -o /dev/null --interface "$iface" $resolve_arg --connect-timeout 4 --max-time 10 \
          -w '%{http_code}' "https://$host/" 2>/dev/null)
   case "$code" in
     403|451) printf 'GEO\n' ;;
@@ -654,15 +667,27 @@ prune_stale_caches() {
 # считается живым, пока работает хотя бы половина из них. Полный перебор
 # запускается только когда сеть действительно изменилась.
 verify_cached_strategy() {
-  local iface="$1" profile="$2" hosts="$3" host code ok=0 total=0
+  local iface="$1" profile="$2" hosts="$3" host code ok=0 total=0 dns ip snapshot
   [ -n "$hosts" ] || hosts="$VERIFY_HOSTS"
   # Профиль из старого кэша (до появления VERIFY_HOSTS) — проверять нечем,
   # считаем рабочим и ждём планового переподбора по TTL.
   [ -n "$hosts" ] || { log "AUTO verification: список контрольных хостов пуст, профиль принят как есть"; return 0; }
+  # Бандл curl статический (musl) и на Android не умеет резолвить имена:
+  # /etc/resolv.conf отсутствует. Адрес решается штатным mdig модуля, а curl
+  # получает его через --resolve. Для системного curl путь тот же.
+  snapshot=$(active_network_snapshot 2>/dev/null)
+  dns=$(snapshot_field "$snapshot" 3)
   for host in $(printf '%s' "$hosts" | tr ',' ' '); do
     [ -n "$host" ] || continue
     total=$((total + 1))
-    code=$(curl -4 -sS -o /dev/null --interface "$iface" --connect-timeout 3 --max-time 6 -w '%{http_code}' "https://$host/" 2>/dev/null)
+    ip=$(resolve_host_ipv4 "$iface" "$host" "$dns") || ip=""
+    if [ -n "$ip" ]; then
+      code=$(curl -4 -sS -o /dev/null --interface "$iface" \
+        --resolve "$host:443:$(printf '%s' "$ip" | cut -d, -f1)" \
+        --connect-timeout 3 --max-time 6 -w '%{http_code}' "https://$host/" 2>/dev/null)
+    else
+      code=000
+    fi
     case "$code" in 2[0-9][0-9]|3[0-9][0-9]) ok=$((ok + 1)) ;; esac
   done
   [ "$total" -gt 0 ] || return 0

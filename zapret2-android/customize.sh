@@ -326,11 +326,16 @@ EOMANIFEST
 verify_binary_manifest
 rm -rf "$MODPATH/binaries" 2>/dev/null
 
+# Бандл curl собран только для arm64. На остальных ABI он не исполним —
+# убираем, чтобы не лежать мёртвым грузом; скрипты автоматически вернутся
+# к системному curl, а при его отсутствии выдадут внятную ошибку.
+[ "$ABI_DIR" = "android-arm64" ] || rm -f "$MODPATH/bin/curl" 2>/dev/null
+
 [ -s "$MODPATH/bin/nfqws2" ] || fail_install "nfqws2 отсутствует после установки"
 [ -s "$MODPATH/bin/zapret-lib.lua" ] || fail_install "zapret-lib.lua отсутствует после установки"
 
 for f in \
-  "$MODPATH/bin/nfqws2" "$MODPATH/bin/ip2net" "$MODPATH/bin/mdig" "$MODPATH/bin/zapret2-control" \
+  "$MODPATH/bin/nfqws2" "$MODPATH/bin/ip2net" "$MODPATH/bin/mdig" "$MODPATH/bin/curl" "$MODPATH/bin/zapret2-control" \
   "$MODPATH/bin/amneziawg-go" "$MODPATH/bin/awg" "$MODPATH/warp-tunnel.sh" \
   "$MODPATH/service.sh" "$MODPATH/boot-completed.sh" "$MODPATH/action.sh" "$MODPATH/uninstall.sh" "$MODPATH/on_change.sh" \
   "$MODPATH/vpn-routing.sh" "$MODPATH/vpn-watch.sh" "$MODPATH/net-role.sh" "$MODPATH/tether-sync.sh" \

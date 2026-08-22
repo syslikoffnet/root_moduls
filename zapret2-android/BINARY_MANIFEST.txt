@@ -14,6 +14,12 @@ b958433e81c6bebcd66c9d3f925364d7a4a3b5c5a4c6d9794fa5baee2f048d2b  ip2net
 9e312a40f35e93619f0d66ec643520bdc15281d6f5fab3f068db2ad0a5e436c0  ip2net
 7339c41e355a2560ac693700ff98692b7311ec49638471aff02e86e401fefe3c  mdig
 2e1a0e950e0bc7189b5662e54fdd66d749d51215b167a647f15659554e7b4090  nfqws2
+# Бандл curl: ЕДИНСТВЕННАЯ позиция вне binaries/<abi>/ — лежит в bin/ архива
+# и устанавливается только на arm64 (см. customize.sh). Источник: статическая
+# сборка stunnel/static-curl 8.20.0 (musl, OpenSSL 4.0.0), дистрибутив
+# dikeckaan/magisk-zte-f50-bin-utils. Рядом bin/curl-cacert.pem (Mozilla CA
+# bundle, curl.se/ca) — статической сборке нужно внешнее хранилище CA.
+32799692a41e88f9f2be85348c2230baf5a0a29ded2d6c086e49e5cbab22b3f4  curl
 
 [android-x86]
 401e6081a9ec82a389134ae508dd1baa75ef2ea92671fa53f5b601ca462988bc  amneziawg-go

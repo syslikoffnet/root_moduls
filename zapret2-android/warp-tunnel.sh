@@ -31,6 +31,16 @@ PREF_DEST="40"
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$STATE_DIR" 2>/dev/null
 chmod 0700 "$RUN_DIR" "$LOG_DIR" "$STATE_DIR" 2>/dev/null || true
 
+# curl может отсутствовать в прошивке (Android <= 9 и облегчённые сборки) —
+# тогда невозможны ни регистрация WARP-аккаунта, ни проверка handshake, и
+# туннель молча не поднимался. Бандл из bin/ модуля замещает системный curl;
+# статической сборке также нужен CA-бандл: хранилища сертификатов Android
+# (набор DER-сертификатов) OpenSSL не читает.
+if [ -x "$BIN_DIR/curl" ]; then
+  PATH="$BIN_DIR:$PATH"; export PATH
+  [ -f "$BIN_DIR/curl-cacert.pem" ] && { CURL_CA_BUNDLE="$BIN_DIR/curl-cacert.pem"; export CURL_CA_BUNDLE; }
+fi
+
 [ -f "$MODDIR/zapret2.conf" ] && . "$MODDIR/zapret2.conf"
 : "${ENABLE_WARP:=0}"
 : "${WARP_DEV:=awg99}"
@@ -1145,6 +1155,14 @@ start_tunnel() {
   fi
 
   acquire_warp_lock || { log_w "Не удалось захватить warp.lock (операция занята)"; return 1; }
+
+  # Раньше отсутствие curl падало молча где-то внутри регистрации и выглядело
+  # как «тумблер не работает». Теперь причина видна сразу и в логе, и в WebUI.
+  if ! command -v curl >/dev/null 2>&1; then
+    log_e "WARP требует curl: в системе его нет, а бандл $BIN_DIR/curl отсутствует. Обновите модуль с бандлом curl или добавьте curl в прошивку"
+    release_warp_lock
+    return 1
+  fi
 
   generate_warp_config || { release_warp_lock; return 1; }
   [ -s "$WARP_CONF" ] || { log_e "Отсутствует конфигурация $WARP_CONF"; release_warp_lock; return 1; }
