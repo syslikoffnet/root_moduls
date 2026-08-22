@@ -1513,6 +1513,18 @@ check_and_heal_warp() {
   fi
 
   step=$(adapt_state_step)
+  # Чёрная дыра (рукопожатие есть, данных нет) — это перехват протокола
+  # провайдером, а не неудачные J-параметры: BASIC-профили её не лечат.
+  # Вместо ~20 пустых шагов матрицы сразу переходим к SIP-маскировке
+  # (шаги 20..39): выставляем 19, чтобы следующим применился step=20.
+  case "$WARP_HEALTH_REASON" in
+    *данные*)
+      if [ "$step" -lt 20 ] 2>/dev/null; then
+        step=19
+        log_w "WARP watchdog: чёрная дыра при живом handshake — BASIC-профили пропущены, сразу SIP-маскировка"
+      fi
+      ;;
+  esac
   batch="${WARP_WATCH_BATCH:-5}"
   case "$batch" in ''|*[!0-9]*) batch=5 ;; esac
   [ "$batch" -ge 1 ] 2>/dev/null || batch=1
