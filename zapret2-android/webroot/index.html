@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111018">
-<title>Zapret2 eCubz</title>
+<title>Zapret2 Ultimate by handsgod</title>
 <style>
 :root{
   color-scheme:dark;
@@ -134,7 +134,7 @@ textarea.input,input.input,select.input{border-radius:12px!important}
 <div class="shell">
 <header class="hero" id="overview">
   <div class="brand-row">
-    <div><div class="brand-kicker">AntiDPI · Root module</div><h1>Zapret2 eCubz</h1><p class="hero-sub">Обход DPI, точечный туннель для любых приложений и раздача интернета.</p></div>
+    <div><div class="brand-kicker">AntiDPI · Root module</div><h1>Zapret2 Ultimate by handsgod</h1><p class="hero-sub">Обход DPI, точечный туннель для любых приложений и раздача интернета.</p></div>
     <span class="hero-badge" id="heroVersion">v3.2.30 (3150)</span>
   </div>
   <div class="status-grid" id="state" aria-live="polite">
@@ -384,7 +384,7 @@ textarea.input,input.input,select.input{border-radius:12px!important}
     <div class="faq-list" id="faqList">
       
       <details class="faq-item">
-        <summary class="faq-title"><span><span class="faq-tag">Основы</span>Как работает модуль Zapret2 eCubz?</span><span class="faq-chevron">▼</span></summary>
+        <summary class="faq-title"><span><span class="faq-tag">Основы</span>Как работает модуль Zapret2 Ultimate by handsgod?</span><span class="faq-chevron">▼</span></summary>
         <div class="faq-body">
           <p>Zapret2 — это полностью <strong>systemless root-модуль</strong> для обхода DPI-блокировок и замедлений (ТСПУ) провайдеров в РФ.</p>
           <p>В отличие от обычных VPN, модуль работает локально прямо на вашем телефоне:</p>
@@ -473,7 +473,7 @@ textarea.input,input.input,select.input{border-radius:12px!important}
             <li><strong>YouTube не воспроизводит 1080p/4K:</strong> Убедитесь, что переключатель <code>QUIC → TCP</code> включен. В секции «SMART AntiDPI» нажмите «Подобрать сейчас».</li>
             <li><strong>Не работает приложение банка / Госуслуг:</strong> Во вкладке «Приложения» найдите банк и нажмите «ИСКЛЮЧИТЬ».</li>
             <li><strong>Как открыть WebUI:</strong> обычный способ — страница модуля в KernelSU / APatch / MMRL, там ничего включать не нужно. Доступ через браузер — это отдельная опция <code>ENABLE_HTTP_API="1"</code> в <code>zapret2.conf</code>; после её включения и перезапуска адрес <code>http://127.0.0.1:8080/</code> открывается <em>на самом телефоне</em>. Сервер намеренно слушает только loopback и снаружи, с другого устройства в сети, недоступен.</li>
-            <li><strong>Отправка логов для поддержки:</strong> Во вкладке «Диагностика» нажмите «Экспорт логов» — журналы будут скопированы в <code>/sdcard/eCubz/</code>. Автоматически при загрузке логи туда больше не копируются: <code>/sdcard</code> читает любое приложение с доступом к хранилищу, а в журналах есть имя Wi-Fi сети, оператор и список установленных приложений.</li>
+            <li><strong>Отправка логов для поддержки:</strong> Во вкладке «Диагностика» нажмите «Экспорт логов» — журналы будут скопированы в <code>/sdcard/handsgod/</code>. Автоматически при загрузке логи туда больше не копируются: <code>/sdcard</code> читает любое приложение с доступом к хранилищу, а в журналах есть имя Wi-Fi сети, оператор и список установленных приложений.</li>
           </ul>
         </div>
       </details>
@@ -482,7 +482,7 @@ textarea.input,input.input,select.input{border-radius:12px!important}
   </div>
 </section>
 </main>
-<footer class="footer">Zapret2 eCubz · Material 3 Expressive WebUI · без внешних библиотек</footer>
+<footer class="footer">Zapret2 Ultimate by handsgod · Material 3 Expressive WebUI · без внешних библиотек</footer>
 </div>
 <div id="startupOverlay" class="startup-overlay" aria-hidden="true">
   <div class="startup-card" role="status" aria-live="polite">
@@ -930,7 +930,7 @@ async function loadDiagnostics(){
   try{
     const data=JSON.parse(await control('json-diagnostics'));
     if(document.activeElement!==byId('nfqwsDebug'))byId('nfqwsDebug').value=data.nfqws_debug;
-    byId('diagInfo').textContent='Boot-safe лог: '+data.service_log+' · экспорт: '+(data.export_dir||'/sdcard/eCubz');
+    byId('diagInfo').textContent='Boot-safe лог: '+data.service_log+' · экспорт: '+(data.export_dir||'/sdcard/handsgod');
   }catch(error){
     byId('diagInfo').textContent='Ошибка диагностики: '+error.message;
   }
@@ -959,10 +959,10 @@ async function collectDiagnostics(){
 }
 
 async function exportLogs(){
-  await busy('exportLogs','Экспорт в /sdcard/eCubz…');
+  await busy('exportLogs','Экспорт в /sdcard/handsgod…');
   try{
     const path=(await control('export-logs')).trim();
-    byId('diagLog').value='Логи экспортированы:\n'+(path||'/sdcard/eCubz');
+    byId('diagLog').value='Логи экспортированы:\n'+(path||'/sdcard/handsgod');
     done('exportLogs','Логи экспортированы');
   }catch(error){
     done('exportLogs','Ошибка: '+error.message);

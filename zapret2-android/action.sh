@@ -5,7 +5,7 @@ MODDIR="${0%/*}"
 case "$MODDIR" in /*) ;; *) MODDIR="$(cd "$MODDIR" 2>/dev/null && pwd)" ;; esac
 CONTROL="$MODDIR/bin/zapret2-control"
 
-echo "Перезапуск Zapret2 eCubz..."
+echo "Перезапуск Zapret2 Ultimate by handsgod..."
 sh "$MODDIR/service.sh" reload
 sleep 1
 if [ -x "$CONTROL" ]; then

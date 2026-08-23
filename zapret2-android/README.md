@@ -2,8 +2,8 @@
 
 Продвинутый системный root-модуль обхода DPI-блокировок и избирательного туннелирования для Android 7.0–16 (KernelSU / KernelSU Next / Magisk / APatch).
 
-Автор: **eCubz** ([Telegram](https://t.me/eCubz))  
-Канал и обновления: [https://t.me/module_ecubz](https://t.me/module_ecubz)
+Автор: **handsgod** ([Telegram](https://github.com/syslikoffnet/root_moduls))  
+Канал и обновления: [https://github.com/syslikoffnet/root_moduls](https://github.com/syslikoffnet/root_moduls)
 
 ---
 
@@ -203,7 +203,7 @@ su -c zapret2-control diag
   - `zapret2_debug.log` — полный журнал работы службы и фаервола.
   - `zapret2_auto.log` — лог автоподбора стратегий AntiDPI.
   - `zapret2_warp.log` — журнал работы и рукопожатий туннеля WARP.
-- Зеркало для пользователя (доступно без Root): `/sdcard/eCubz/logs/zapret2-android/`
+- Зеркало для пользователя (доступно без Root): `/sdcard/handsgod/logs/zapret2-android/`
 
 ### 2. Если не открывается YouTube или Discord:
 - Откройте WebUI и нажмите кнопку **«Перепроверить сеть»** (или выполните `su -c zapret2-control auto-run`). Модуль заново протестирует сеть и переключится на рабочую стратегию.

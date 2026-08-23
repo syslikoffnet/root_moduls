@@ -1,5 +1,5 @@
 # Zapret2 Binary Manifest (SHA-256 Checksums)
-# Generated for eCubz zapret2-android release
+# Generated for handsgod zapret2-android release
 
 [android-arm]
 1ccabfdc29dfe3b4d62fbdff0cf6f907d0ce781383cd69723c29cffb05656093  amneziawg-go

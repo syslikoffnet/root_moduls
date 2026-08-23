@@ -2,7 +2,7 @@
 umask 077
 MODDIR=${0%/*}
 INTERNAL_DIR="$MODDIR/logs"
-EXPORT_DIR="/sdcard/eCubz"
+EXPORT_DIR="/sdcard/handsgod"
 MODE=${1:-now}
 
 wait_for_export_dir() {

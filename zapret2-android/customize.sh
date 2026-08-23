@@ -3,7 +3,7 @@ umask 077
 
 SKIPUNZIP=1
 
-INSTALL_LOG_DIR=/sdcard/eCubz
+INSTALL_LOG_DIR=/sdcard/handsgod
 INSTALL_LOG="$INSTALL_LOG_DIR/zapret2_install.log"
 TMP_INSTALL_LOG=/data/local/tmp/zapret2_install.log
 mkdir -p /data/local/tmp 2>/dev/null
@@ -63,7 +63,7 @@ manager_name() {
 }
 
 ui_print "***************************************"
-ui_print " Zapret2 eCubz — universal installer"
+ui_print " Zapret2 Ultimate by handsgod — universal installer"
 ui_print " Magisk / KernelSU / APatch"
 ui_print "***************************************"
 
@@ -472,6 +472,16 @@ mkdir -p "$GEO_DATA/bin" 2>/dev/null
 [ -f "$GEO_DATA/domains.list" ] || cp -f "$MODPATH/geo/domains.list.default" "$GEO_DATA/domains.list" 2>/dev/null
 [ -f "$GEO_DATA/subscriptions.list" ] || cp -f "$MODPATH/geo/subscriptions.list.default" "$GEO_DATA/subscriptions.list" 2>/dev/null
 set_exec "$MODPATH/geo/service.sh"; set_exec "$MODPATH/geo/uninstall.sh"; set_exec "$MODPATH/geo/bin/geo-control"
+# 1) Встроенный бинарь (arm64) — интернет при установке НЕ нужен
+if [ ! -x "$GEO_DATA/bin/sing-box" ] && [ -x "$MODPATH/geo/binaries/android-arm64/sing-box" ] && [ "$ABI_DIR" = "android-arm64" ]; then
+  cp -f "$MODPATH/geo/binaries/android-arm64/sing-box" "$GEO_DATA/bin/sing-box" 2>/dev/null
+  chmod 0755 "$GEO_DATA/bin/sing-box" 2>/dev/null
+  ui_print "- GEO: sing-box установлен из комплекта модуля (без сети)"
+  GEOVER=$("$GEO_DATA/bin/sing-box" version 2>/dev/null | head -n1)
+  [ -n "$GEOVER" ] && ui_print "- GEO: $GEOVER" || ui_print "- ! GEO: бинарь не запускается — будет скачан официальный"
+  [ -n "$GEOVER" ] || rm -f "$GEO_DATA/bin/sing-box"
+fi
+# 2) Запасной путь: официальный релиз с SHA-256 (другие ABI / свежая версия)
 if [ ! -x "$GEO_DATA/bin/sing-box" ] && [ -n "$GEO_ARCH" ]; then
   ui_print "- GEO: скачиваю sing-box ${GEO_SB_VER} (${GEO_ARCH})..."
   GEO_TMP=/data/local/tmp/sing-box-geo-$$.tar.gz
@@ -519,5 +529,5 @@ ui_print "- GEO: раздел «Гео-прокси» появится в WebUI 
 ui_print " "
 ui_print "- Установка Zapret2 завершена!"
 ui_print "- После перезагрузки модуль запустится автоматически"
-ui_print "- Лог установки: /sdcard/eCubz/zapret2_install.log"
+ui_print "- Лог установки: /sdcard/handsgod/zapret2_install.log"
 ui_print "- Настройка доступна через WebUI"

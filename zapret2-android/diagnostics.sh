@@ -8,7 +8,7 @@ LOG_DIR="$MODDIR/logs"
 SERVICE_LOG="$LOG_DIR/zapret2_debug.log"
 NFQWS_LOG="$LOG_DIR/zapret2_nfqws.log"
 OUT="$LOG_DIR/zapret2_diagnostics_latest.txt"
-EXPORT_DIR="/sdcard/eCubz"
+EXPORT_DIR="/sdcard/handsgod"
 mkdir -p "$LOG_DIR" "$RUN_DIR" 2>/dev/null
 chmod 0700 "$LOG_DIR" "$RUN_DIR" 2>/dev/null || true
 
@@ -47,7 +47,7 @@ pid_owned() {
 }
 
 {
-  echo "Zapret2 eCubz diagnostics"
+  echo "Zapret2 Ultimate by handsgod diagnostics"
   echo "Privacy: contains installed package names, network/routing state and logs; nfqws debug may contain domains/packet metadata if it was enabled."
   echo "Generated: $(date '+%Y-%m-%d %H:%M:%S %z')"
   echo "Module: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1) code=$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)"
