@@ -177,7 +177,7 @@ button:focus-visible,.nav-chip:focus-visible,.control:focus-visible,.switch-labe
     <p class="hint"><strong>SMART_NATIVE</strong> и <strong>SMART_ACTIVE</strong> автоматически тестируют и подбирают профили под вашего оператора связи. При смене Wi-Fi на сотовую сеть переподбор происходит мгновенно в фоне.</p>
     <p class="hint" id="smartStrategyOrder">Порядок AUTO: загрузка…</p>
     <details class="expert" id="expertStrategy"><summary>Экспертная настройка CUSTOM</summary><label class="field"><span>Пользовательские аргументы nfqws2</span><textarea class="control" id="strategyCustom" rows="5" placeholder="--filter-tcp=80,443 …"></textarea></label><p class="muted">CUSTOM отключает встроенное SMART-профилирование. Используйте только если хотите полностью управлять стратегией вручную.</p></details>
-    <div class="actions"><button type="button" class="md-button tertiary" id="saveSmart" onclick="saveSmart()">Сохранить SMART</button><button type="button" class="md-button tonal" id="runAuto" onclick="runAuto()">Подобрать сейчас</button><button type="button" class="md-button outlined" id="clearAuto" onclick="clearAuto()">Сбросить кэш AUTO</button></div>
+    <div class="actions"><button type="button" class="md-button tertiary" id="saveSmart" onclick="saveSmart()">Сохранить SMART</button><button type="button" class="md-button tonal" id="runAuto" onclick="runAuto()">Подобрать сейчас</button><button type="button" class="md-button tonal" id="smartAll" onclick="smartAll()">🧠 Умный подбор всего</button><button type="button" class="md-button outlined" id="clearAuto" onclick="clearAuto()">Сбросить кэш AUTO</button></div>
   </div>
 </section>
 
@@ -768,9 +768,20 @@ async function runAuto(){
   try{
     await control('auto-run');
     await Promise.all([loadStatus(),loadStrategies()]);
-    done('runAuto','AUTO-подбор завершён');
+    done('runAuto','AUTO-подбор запущен/выполнен');
   }catch(error){
     done('runAuto','AUTO: '+error.message);
+  }
+}
+
+async function smartAll(){
+  await busy('smartAll','Запускаю умный подбор всего (WARP + стратегии)…');
+  try{
+    await control('smart-all');
+    await Promise.all([loadStatus(),loadStrategies(),loadWarp()]);
+    done('smartAll','Полный подбор идёт в фоне: WARP-профиль ищется, сеть не рвётся. Итог — через 1–3 мин в статусе и логе');
+  }catch(error){
+    done('smartAll','Ошибка: '+error.message);
   }
 }
 

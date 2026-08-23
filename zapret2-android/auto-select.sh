@@ -188,12 +188,22 @@ sync_health_result() {
 }
 
 request_profile_reload() {
-  local selected="$1" applied applied_signature current_signature
+  local selected="$1" applied applied_signature current_signature rt_engine
   applied=$(applied_profile)
   valid_profile "$applied" || applied=""
   applied_signature=$(sed -n 's/^AUTO_STRATEGY_SIGNATURE=//p' "$HEALTH_FILE" 2>/dev/null | head -n1)
   current_signature=$(strategy_catalog_signature)
   if [ "$selected" = "$applied" ] && [ -n "$current_signature" ] && [ "$current_signature" = "$applied_signature" ]; then
+    sync_health_result
+    return 0
+  fi
+  # При SMART_NATIVE перезапуск не нужен в принципе: движок не применяет
+  # внешние per-network профили, а отвергнутый reload-profile выливается в
+  # ПОЛНЫЙ перезапуск службы (десятки секунд без обхода). Обновляем статус и уходим.
+  rt_engine=""
+  [ -f "$RUNTIME_FILE" ] && rt_engine=$(sed -n 's/^STRATEGY_EFFECTIVE="\{0,1\}\([^\"]*\)"\{0,1\}$/\1/p' "$RUNTIME_FILE" | head -n1)
+  if [ "$rt_engine" = "SMART_NATIVE" ]; then
+    log "AUTO: движок SMART_NATIVE — подмена профиля не применяется, reload не запрашивается"
     sync_health_result
     return 0
   fi
@@ -703,6 +713,18 @@ run_probe() {
   trap 'cleanup_test; rm -rf "$LOCK_DIR" 2>/dev/null; rm -f "$PROBE_PID_FILE" "$PROBE_SPEC_FILE" "$BASELINE_FILE" "$CANDIDATE_FILE" 2>/dev/null' EXIT
   [ "$AUTO_SELECT_ENABLED" = 1 ] || { resolve_current >/dev/null; return 0; }
   [ "$AUTO_TEST_QNUM" = "${QNUM:-200}" ] && AUTO_TEST_QNUM=$((AUTO_TEST_QNUM + 1))
+  # SMART_NATIVE выбирает стратегию сам внутри nfqws2 (circular по reply-feed):
+  # результат внешнего подбора этому движку применить некуда — раньше пробы
+  # гонялись честно (минуты радио), а итоговый reload-profile отвергался и
+  # превращался в ПОЛНЫЙ перезапуск службы. Теперь — внятно и сразу, в том
+  # числе для принудительного запуска (кнопка «Подобрать»).
+  rt_engine=""
+  [ -f "$RUNTIME_FILE" ] && rt_engine=$(sed -n 's/^STRATEGY_EFFECTIVE="\{0,1\}\([^\"]*\)"\{0,1\}$/\1/p' "$RUNTIME_FILE" | head -n1)
+  if [ "$rt_engine" = "SMART_NATIVE" ]; then
+    log "AUTO: движок SMART_NATIVE — стратегии выбирает сам nfqws2 (circular), внешний подбор не требуется"
+    resolve_current >/dev/null
+    return 0
+  fi
   cleanup_test
   prune_stale_caches
   service_pid=$(cat "$RUN_DIR/service.lock/pid" 2>/dev/null)

@@ -38,7 +38,7 @@ is_read_action() {
 }
 is_write_action() {
   case "$1" in
-    hotspot-settings|save-smart|save-strategies|replace-list|nfqws-debug|diag|export-logs|auto-run|auto-clear|warp-toggle|warp-sip|warp-rekey|warp-restart|warp-save|restart|forcetcp|quicmode|hostlist-mode|hostlist-clear) return 0 ;;
+    hotspot-settings|save-smart|save-strategies|replace-list|nfqws-debug|diag|export-logs|auto-run|auto-clear|smart-all|warp-toggle|warp-sip|warp-rekey|warp-restart|warp-save|restart|forcetcp|quicmode|hostlist-mode|hostlist-clear) return 0 ;;
     *) return 1 ;;
   esac
 }

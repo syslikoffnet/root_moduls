@@ -388,7 +388,27 @@ cmd_diag() { sh "$MODDIR/diagnostics.sh"; }
 cmd_export_logs() { sh "$MODDIR/log-export.sh" now; }
 cmd_module_version() { sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1; }
 cmd_auto_status() { sh "$MODDIR/auto-select.sh" status; }
-cmd_auto_run() { sh "$MODDIR/auto-select.sh" force; }
+cmd_auto_run() {
+  # Полный подбор занимает минуты: из WebUI (Z2_ASYNC=1) он уходит в фон,
+  # иначе CGI-процесс держал бы соединение всё это время и страница висела.
+  if [ "${Z2_ASYNC:-0}" = "1" ]; then
+    spawn_detached sh "$MODDIR/auto-select.sh" force
+    echo '{"ok":true,"state":"auto-run-started"}'
+    return 0
+  fi
+  sh "$MODDIR/auto-select.sh" force
+}
+# «Умный подбор всего» одним нажатием: перезапуск WARP со сбросом перебора
+# профилей + автоподбор стратегии под текущую сеть. Без даунтайма: маршруты
+# WARP на время поиска уходят в прямой канал с работающим DPI-обходом.
+cmd_smart_all() {
+  if [ "${Z2_ASYNC:-0}" = "1" ]; then
+    spawn_detached sh "$MODDIR/smart-all.sh"
+    echo '{"ok":true,"state":"smart-all-started"}'
+    return 0
+  fi
+  sh "$MODDIR/smart-all.sh"
+}
 cmd_auto_clear() { sh "$MODDIR/auto-select.sh" clear; sh "$MODDIR/service.sh" reload; }
 cmd_webui() { echo "WebUI открывается менеджером root из webroot/index.html"; }
 
@@ -652,10 +672,11 @@ case "$1" in
   module-version) cmd_module_version ;;
   auto-status) cmd_auto_status ;;
   auto-run) cmd_auto_run ;;
+  smart-all) cmd_smart_all ;;
   auto-clear) cmd_auto_clear ;;
   restart) reload_service ;;
   webui) cmd_webui ;;
   log) cmd_tail_log "$LOG_FILE" "$2" ;;
   nfqws-log) cmd_tail_log "$NFQWS_LOG" "$2" ;;
-  *) echo "Команды: status, json-status, json-apps, json-app-lists, json-warp-status, warp-toggle 0|1, warp-rekey, warp-save, save-smart, app-state <pkg> include|exclude|none, app-state-set, sync-apps, restart, diag, export-logs, module-version, nfqws-debug 0|1, log, nfqws-log" ;;
+  *) echo "Команды: status, json-status, json-hotspot-settings, json-strategies, json-diagnostics, json-hostlist, json-learned, json-warp-status, smart-all, auto-run, auto-clear, auto-status, warp-toggle 0|1, warp-sip on|off|toggle, warp-rekey, warp-restart, warp-save, save-smart, save-strategies, replace-list, hotspot-settings, hostlist-mode, hostlist-clear, forcetcp, quicmode, restart, diag, export-logs, module-version, nfqws-debug 0|1, log, nfqws-log" ;;
 esac

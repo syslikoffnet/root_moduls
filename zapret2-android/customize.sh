@@ -336,7 +336,7 @@ rm -rf "$MODPATH/binaries" 2>/dev/null
 
 for f in \
   "$MODPATH/bin/nfqws2" "$MODPATH/bin/ip2net" "$MODPATH/bin/mdig" "$MODPATH/bin/curl" "$MODPATH/bin/zapret2-control" \
-  "$MODPATH/bin/amneziawg-go" "$MODPATH/bin/awg" "$MODPATH/warp-tunnel.sh" \
+  "$MODPATH/bin/amneziawg-go" "$MODPATH/bin/awg" "$MODPATH/warp-tunnel.sh" "$MODPATH/smart-all.sh" \
   "$MODPATH/service.sh" "$MODPATH/boot-completed.sh" "$MODPATH/action.sh" "$MODPATH/uninstall.sh" "$MODPATH/on_change.sh" \
   "$MODPATH/vpn-routing.sh" "$MODPATH/vpn-watch.sh" "$MODPATH/net-role.sh" "$MODPATH/tether-sync.sh" \
   "$MODPATH/auto-select.sh" "$MODPATH/strategy-lib.sh" "$MODPATH/service-watch.sh" "$MODPATH/network-event.sh" "$MODPATH/log-export.sh" "$MODPATH/diagnostics.sh" \
