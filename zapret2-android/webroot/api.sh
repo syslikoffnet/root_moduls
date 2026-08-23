@@ -33,12 +33,14 @@ send_response() {
 is_read_action() {
   case "$1" in
     status|json-status|json-hotspot-settings|json-strategies|json-diagnostics|json-warp-status|json-hostlist|json-learned|module-version|auto-status|log|nfqws-log) return 0 ;;
+    geo-status|geo-subs-get|geo-domains-get|geo-apps-list|geo-proxy-get|geo-log) return 0 ;;
     *) return 1 ;;
   esac
 }
 is_write_action() {
   case "$1" in
     hotspot-settings|save-smart|save-strategies|replace-list|nfqws-debug|diag|export-logs|auto-run|auto-clear|smart-all|warp-toggle|warp-sip|warp-rekey|warp-restart|warp-save|restart|forcetcp|quicmode|hostlist-mode|hostlist-clear) return 0 ;;
+    geo-subs-set|geo-happ-import|geo-domains-set|geo-apps-set|geo-proxy-set|geo-toggle|geo-update|geo-restart) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -57,6 +59,20 @@ param_dec() { _r=$(param_raw "$1" "$2"); [ -n "$_r" ] && urldecode "$_r"; }
 
 dispatch_control() {
   _action="$1"; shift
+  # Гео-часть (sing-box) исполняется своим контроллером: geo-<cmd> -> geo/bin/geo-control <cmd>
+  case "$_action" in
+    geo-*)
+      _geoctl="$MODDIR/geo/bin/geo-control"
+      [ -x "$_geoctl" ] || { send_response '500 Internal Server Error' '{"ok":false,"error":"geo-control unavailable"}'; exit 1; }
+      _out=$("$_geoctl" "${_action#geo-}" "$@" 2>&1); _rc=$?
+      if [ "$_rc" -eq 0 ]; then
+        [ -n "$_out" ] && send_response '200 OK' "$_out" || send_response '200 OK' '{"ok":true}'
+      else
+        send_response '500 Internal Server Error' "$_out"
+      fi
+      exit "$_rc"
+      ;;
+  esac
   if ! is_valid_action "$_action"; then
     send_response '403 Forbidden' "{\"ok\":false,\"error\":\"Недопустимое действие: $(json_escape "$_action")\"}"
     exit 1

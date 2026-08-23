@@ -220,3 +220,27 @@ su -c zapret2-control diag
 - **Версии Android**: Android 7.0 (Nougat) — Android 16 (Baklava).
 - **Архитектуры процессоров**: ARM64 (`aarch64`), ARMv7 (`armeabi-v7a`), x86, x86_64.
 - **Прошивки**: AOSP, Pixel Experience, LineageOS, Xiaomi HyperOS / MIUI, Samsung OneUI, RealmeUI / ColorOS / OxygenOS, Transsion (Infinix/Tecno).
+
+
+---
+
+# 🌐 Zapret2 Ultimate by handsgod (v5.0.0)
+
+**Два движка в одном модуле:**
+
+| Движок | Что делает |
+|---|---|
+| **AntiDPI (nfqws2)** | Обход DPI-блокировок и замедлений: YouTube, Discord и т.п. SMART-движок, авто-подбор стратегий под сеть, кэш на Wi-Fi/мобилку, QUIC→TCP, раздача (Hotspot), WARP-туннель AmneziaWG |
+| **Гео-прокси (sing-box, TPROXY без TUN)** | Сервисы, блокирующие РФ-IP: ChatGPT, Spotify, Notion и др. Только домены списка → через VLESS/SS/Hysteria2/Trojan; авто-подписки (репозиторий igareck + **импорт из Happ**), классы wifi/mobile/all, urltest сам выбирает лучшую ноду по пингу, отбор приложений (все / кроме / только выбранные) |
+
+**Единый WebUI** (KernelSU / APatch / MMRL): статус обоих движков, стратегии,
+WARP, раздача, списки, раздел «🌍 Гео-прокси» (импорт из Happ, подписки,
+приложения, домены), диагностика.
+
+**Принципы:** без TUN, fail-open (любой сбой = мгновенный прямой интернет),
+минимум батареи (urltest спит при простое, health 1/90 c), SHA-256 sing-box
+проверяется при установке, прокси-порт закрыт от чужих приложений.
+
+**Обновление с v4.x / с отдельного geo-unblock:** прошить поверх, перезагрузка.
+Настройки, списки, подписки и домены сохраняются; отдельный geo-unblock будет
+остановлен и удалён автоматически (данные останутся в /data/adb/geo-unblock).

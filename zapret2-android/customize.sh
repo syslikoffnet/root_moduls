@@ -448,6 +448,67 @@ rm -rf "$UPGRADE_BACKUP" 2>/dev/null
 ilog "installer=success"
 flush_install_log
 
+
+# ------------------------------------------------------------------------------
+# GEO: точечный гео-прокси (sing-box, TPROXY без TUN) — встроенная часть модуля
+# ------------------------------------------------------------------------------
+GEO_DATA=/data/adb/geo-unblock
+GEO_SB_VER="1.13.19"
+case "$ABI" in
+  arm64-v8a|arm64|aarch64)      GEO_SHA256="e737ac40187563673e1fc282aebf1774e09f3b2057203872798968a2126fab53"; GEO_ARCH=android-arm64 ;;
+  armeabi-v7a|armeabi|arm)      GEO_SHA256="0e2f8004279365a642992ee6a683efb9c1f12a8aa56bfcef98196e991bf72eee"; GEO_ARCH=android-arm ;;
+  x86_64|x64)                   GEO_SHA256="85e39a82576d222fef743e1c1435e0f3eb29c75fbe88837671efe1098fda5602"; GEO_ARCH=android-amd64 ;;
+  x86)                          GEO_SHA256="d07fccc31c5426ab250f9f190f7092a7f777daa7de538e20bd7afe77c8b43eba"; GEO_ARCH=android-386 ;;
+  *)                            GEO_SHA256=""; GEO_ARCH="" ;;
+esac
+mkdir -p "$GEO_DATA/bin" 2>/dev/null
+[ -f "$GEO_DATA/domains.list" ] || cp -f "$MODPATH/geo/domains.list.default" "$GEO_DATA/domains.list" 2>/dev/null
+[ -f "$GEO_DATA/subscriptions.list" ] || cp -f "$MODPATH/geo/subscriptions.list.default" "$GEO_DATA/subscriptions.list" 2>/dev/null
+set_exec "$MODPATH/geo/service.sh"; set_exec "$MODPATH/geo/uninstall.sh"; set_exec "$MODPATH/geo/bin/geo-control"
+if [ ! -x "$GEO_DATA/bin/sing-box" ] && [ -n "$GEO_ARCH" ]; then
+  ui_print "- GEO: скачиваю sing-box ${GEO_SB_VER} (${GEO_ARCH})..."
+  GEO_TMP=/data/local/tmp/sing-box-geo-$$.tar.gz
+  GEO_URL="https://github.com/SagerNet/sing-box/releases/download/v${GEO_SB_VER}/sing-box-${GEO_SB_VER}-${GEO_ARCH}.tar.gz"
+  GEO_OK=0
+  if [ -x "$MODPATH/bin/curl" ]; then
+    CURL_CA_BUNDLE="$MODPATH/bin/curl-cacert.pem" "$MODPATH/bin/curl" -sSL --max-time 180 -o "$GEO_TMP" "$GEO_URL" && GEO_OK=1
+  elif command -v curl >/dev/null 2>&1; then
+    curl -sSL --max-time 180 -o "$GEO_TMP" "$GEO_URL" && GEO_OK=1
+  else
+    for bb in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do
+      [ -x "$bb" ] && "$bb" wget -q -T 180 -O "$GEO_TMP" "$GEO_URL" && { GEO_OK=1; break; }
+    done
+  fi
+  if [ "$GEO_OK" = 1 ] && [ -s "$GEO_TMP" ]; then
+    GEO_SUM=$(sha256sum "$GEO_TMP" 2>/dev/null | awk '{print $1}')
+    [ -z "$GEO_SUM" ] && for bb in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do [ -x "$bb" ] && { GEO_SUM=$("$bb" sha256sum "$GEO_TMP" 2>/dev/null | awk '{print $1}'); break; }; done
+    if [ -n "$GEO_SHA256" ] && [ "$GEO_SUM" != "$GEO_SHA256" ]; then
+      ui_print "- ! GEO: SHA-256 sing-box не совпал — пропуск (можно положить вручную)"
+      rm -f "$GEO_TMP"
+    else
+      GEO_DIR=/data/local/tmp/sbgeo-$$; mkdir -p "$GEO_DIR"
+      tar -xzf "$GEO_TMP" -C "$GEO_DIR" 2>/dev/null || busybox tar -xzf "$GEO_TMP" -C "$GEO_DIR" 2>/dev/null
+      GEO_FOUND=$(find "$GEO_DIR" -type f -name sing-box 2>/dev/null | head -n1)
+      [ -n "$GEO_FOUND" ] && cp -f "$GEO_FOUND" "$GEO_DATA/bin/sing-box" && chmod 0755 "$GEO_DATA/bin/sing-box" && ui_print "- GEO: sing-box установлен и проверен"
+      rm -rf "$GEO_DIR" "$GEO_TMP"
+    fi
+  else
+    ui_print "- ! GEO: sing-box не скачался — положите в $GEO_DATA/bin/sing-box (chmod 755)"
+  fi
+else
+  ui_print "- GEO: sing-box уже на месте"
+fi
+# Прежний ОТДЕЛЬНЫЙ модуль geo-unblock останавливаем и помечаем на удаление:
+# его данные (подписки/домены/приложения) живут в /data/adb/geo-unblock и
+# подхватываются встроенной частью автоматически.
+if [ -d /data/adb/modules/geo-unblock ]; then
+  sh /data/adb/modules/geo-unblock/service.sh stop >/dev/null 2>&1
+  sh /data/adb/modules/geo-unblock/uninstall.sh >/dev/null 2>&1
+  touch /data/adb/modules/geo-unblock/remove 2>/dev/null
+  ui_print "- GEO: прежний отдельный geo-unblock остановлен и будет удалён"
+fi
+ui_print "- GEO: раздел «Гео-прокси» появится в WebUI после перезагрузки"
+
 ui_print " "
 ui_print "- Установка Zapret2 завершена!"
 ui_print "- После перезагрузки модуль запустится автоматически"

@@ -1,0 +1,195 @@
+#!/system/bin/sh
+# geo-control — CLI/WebUI backend модуля geo-unblock.
+# Вызывается WebUI (ksu.exec) и из консоли. Все аргументы — argv, никакого
+# eval; все записи — атомарные (tmp + mv) со строгой валидацией символов.
+umask 077
+
+SELF_DIR="${0%/*}"
+case "$SELF_DIR" in /*) ;; *) SELF_DIR="$(pwd)/$SELF_DIR" ;; esac
+MODDIR="${SELF_DIR%/geo/bin}"
+[ -f "$MODDIR/module.prop" ] || MODDIR=/data/adb/modules/zapret2-android
+DATA_DIR=/data/adb/geo-unblock
+SERVICE="$MODDIR/geo/service.sh"
+LOG="$MODDIR/geo/logs/geo-unblock.log"
+STATE_FILE="$MODDIR/geo/run/state.env"
+mkdir -p "$DATA_DIR" "$MODDIR/geo/logs" 2>/dev/null
+
+json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g'; }
+spawn_detached() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh "$@" </dev/null >/dev/null 2>&1 &
+  else
+    nohup sh "$@" </dev/null >/dev/null 2>&1 &
+  fi
+}
+sv() { sed -n "s/^$1=//p" "$STATE_FILE" 2>/dev/null | head -n1; }
+nv() { local v; v=$(sv "$1"); case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac; }
+g0() { local v; v=$("$@" 2>/dev/null); case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac; }
+valid_class() { case "$1" in wifi|mobile|all) return 0 ;; *) return 1 ;; esac; }
+valid_url() { case "$1" in https://*|http://*) printf '%s' "$1" | grep -q ' ' && return 1; return 0 ;; *) return 1 ;; esac; }
+
+atomic_write() { # $1=file $2=content-file
+  local tmp="$1.tmp.$$"
+  cat "$2" > "$tmp" 2>/dev/null && mv -f "$tmp" "$1" || { rm -f "$tmp"; return 1; }
+}
+
+# ---------------------------------------------------------------- статус ----
+cmd_status() {
+  local health=FAIL cls="" bin=ok ver
+  ver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
+  [ -x "$DATA_DIR/bin/sing-box" ] || [ -x "$MODDIR/bin/sing-box" ] || bin=none
+  cls=$("$MODDIR/service.sh" class 2>/dev/null)
+  [ -z "$cls" ] && cls=unknown
+  if [ -x /data/adb/modules/zapret2-android/bin/curl ]; then
+    CURL_CA_BUNDLE=/data/adb/modules/zapret2-android/bin/curl-cacert.pem \
+      /data/adb/modules/zapret2-android/bin/curl -s -m 6 \
+      -x http://127.0.0.1:7890 -o /dev/null -w '%{http_code}' \
+      https://cp.cloudflare.com/generate_204 2>/dev/null | grep -q '^2' && health=OK
+  fi
+  printf '{"version":"%s","state":"%s","rules":"%s","proxy_mode":"%s","class_now":"%s","class_saved":"%s","nodes":%s,"health":"%s","binary":"%s","apps_mode":"%s","apps_selected":%s,"subs":%s,"domains":%s,"manual_nodes":%s}\n' \
+    "$(json_escape "${ver:-unknown}")" \
+    "$(json_escape "$(sv STATE)")" \
+    "$(json_escape "$(sv MODE)")" \
+    "$(json_escape "$(sv PROXY)")" \
+    "$(json_escape "$cls")" \
+    "$(json_escape "$(sv CLASS)")" \
+    "$(nv NODES)" \
+    "$health" "$bin" \
+    "$(cat "$DATA_DIR/apps.mode" 2>/dev/null || echo all)" \
+    "$(g0 grep -c . "$DATA_DIR/apps.list")" \
+    "$(g0 grep -cvE '^[[:space:]]*(#|$)' "$DATA_DIR/subscriptions.list")" \
+    "$(g0 grep -cvE '^[[:space:]]*(#|$)' "$DATA_DIR/domains.list")" \
+    "$(g0 grep -c . "$DATA_DIR/nodes-manual.list")"
+}
+
+# ------------------------------------------------------------ подписки ----
+cmd_subs_get() { cat "$DATA_DIR/subscriptions.list" 2>/dev/null || echo "# пусто"; }
+
+cmd_subs_set() {
+  local tmp=/tmp/.geosubs.$$
+  printf '%s\n' "$2" > "$tmp" || return 1
+  while IFS= read -r line; do
+    line=$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "$line" in ''|'#'*) continue ;; esac
+    valid_class "$(printf '%s' "$line" | awk '{print $1}')" || { rm -f "$tmp"; echo "Неверный класс: $line" >&2; return 1; }
+    valid_url "$(printf '%s' "$line" | awk '{print $2}')" || { rm -f "$tmp"; echo "Неверный URL: $line" >&2; return 1; }
+  done < "$tmp"
+  atomic_write "$DATA_DIR/subscriptions.list" "$tmp" || return 1
+  spawn_detached "$SERVICE" update
+  echo "OK: подписки сохранены, ноды обновляются"
+}
+
+# Импорт из Happ: $2=класс, $3=URL подписки ИЛИ текст со ссылками vless://...
+cmd_happ_import() {
+  local cls="$2" data="$3" cnt
+  valid_class "$cls" || { echo "Класс: wifi|mobile|all" >&2; return 1; }
+  case "$data" in
+    https://*|http://*)
+      valid_url "$data" || { echo "Неверный URL" >&2; return 1; }
+      printf '%s %s\n' "$cls" "$data" >> "$DATA_DIR/subscriptions.list"
+      spawn_detached "$SERVICE" update
+      echo "OK: подписка добавлена в класс '$cls', ноды скачиваются"
+      ;;
+    vless://*|ss://*|hysteria2://*|trojan://*)
+      cnt=$(sh "$SERVICE" import-raw "$data" 2>/dev/null | grep -o '[0-9]*' | head -n1)
+      echo "OK: вставлено ссылок ${cnt:-0} (ручные ноды, класс все)"
+      ;;
+    *) echo "Вставьте ссылку https://... или строки vless://..." >&2; return 1 ;;
+  esac
+}
+
+# -------------------------------------------------------------- домены ----
+cmd_domains_get() { cat "$DATA_DIR/domains.list" 2>/dev/null; }
+cmd_domains_set() {
+  local tmp=/tmp/.geodom.$$
+  printf '%s\n' "$2" > "$tmp" || return 1
+  while IFS= read -r line; do
+    line=$(printf '%s' "$line" | tr -d '\r' | sed 's/[[:space:]]//g')
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *[!A-Za-z0-9.-]*) rm -f "$tmp"; echo "Недопустимая строка: $line" >&2; return 1 ;; esac
+  done < "$tmp"
+  atomic_write "$DATA_DIR/domains.list" "$tmp" || return 1
+  echo "OK: домены сохранены (применятся сами в течение ~90 сек)"
+}
+
+# ---------------------------------------------------------- приложения ----
+cmd_apps_list() {
+  local mode sel p u first=1
+  mode=$(cat "$DATA_DIR/apps.mode" 2>/dev/null); case "$mode" in all|exclude|include) ;; *) mode=all ;; esac
+  sel=" $(tr '\n' ' ' < "$DATA_DIR/apps.list" 2>/dev/null) "
+  printf '{"mode":"%s","selected":[' "$mode"
+  for u in $sel; do
+    case "$u" in ''|*[!0-9]*) continue ;; esac
+    [ "$first" = 1 ] || printf ','
+    first=0; printf '%s' "$u"
+  done
+  printf '],"apps":['
+  first=1
+  pm list packages -3 -U 2>/dev/null | sed 's/^package://; s/ uid:/ /' | sort | while read -r p u; do
+    case "$u" in uid:*) u=${u#uid:} ;; esac
+    case "$u" in ''|*[!0-9]*) continue ;; esac
+    [ "$first" = 1 ] || printf ','
+    first=0
+    printf '{"p":"%s","u":%s}' "$p" "$u"
+  done
+  printf ']}\n'
+}
+
+cmd_apps_set() {
+  local mode="$2" uids="$3" tmp=/tmp/.geoapps.$$ u ok=0
+  case "$mode" in all|exclude|include) ;; *) echo "Режим: all|exclude|include" >&2; return 1 ;; esac
+  : > "$tmp"
+  for u in $(printf '%s' "$uids" | tr ',' ' '); do
+    case "$u" in ''|*[!0-9]*) continue ;; esac
+    [ "$u" -le 65535 ] 2>/dev/null || continue
+    echo "$u" >> "$tmp"; ok=$((ok + 1))
+  done
+  [ "$mode" != include ] || [ "$ok" -gt 0 ] || { rm -f "$tmp"; echo "В режиме include нужен хотя бы один UID" >&2; return 1; }
+  sort -u "$tmp" > "$tmp.2" && mv -f "$tmp.2" "$tmp"
+  atomic_write "$DATA_DIR/apps.list" "$tmp" || { rm -f "$tmp"; return 1; }
+  printf '%s\n' "$mode" > "$DATA_DIR/apps.mode"
+  rm -f "$tmp"
+  spawn_detached "$SERVICE" restart
+  echo "OK: режим $mode, приложений $ok — правила пересобираются"
+}
+
+# ------------------------------------------------------------- прочее ----
+cmd_proxy_get() { cat "$DATA_DIR/proxy.uri" 2>/dev/null; }
+cmd_proxy_set() {
+  case "$2" in
+    '') rm -f "$DATA_DIR/proxy.uri" 2>/dev/null; echo "OK: свой прокси убран (режим auto)" ;;
+    vless://*|ss://*|hysteria2://*|trojan://*)
+      printf '%s\n' "$2" > "$DATA_DIR/proxy.uri"; chmod 0600 "$DATA_DIR/proxy.uri"
+      echo "OK: прокси сохранён (приоритетнее подписок)" ;;
+    *) echo "Поддержка: vless:// ss:// hysteria2:// trojan:// или пусто" >&2; return 1 ;;
+  esac
+  spawn_detached "$SERVICE" restart
+}
+
+cmd_toggle() {
+  case "$2" in
+    1) rm -f "$DATA_DIR/disabled"; spawn_detached "$SERVICE" restart; echo "OK: модуль включён" ;;
+    0) : > "$DATA_DIR/disabled"; spawn_detached "$SERVICE" stop; echo "OK: модуль выключен (правила сняты)" ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_log() { tail -n "${2:-80}" "$LOG" 2>/dev/null; }
+
+case "$1" in
+  status)        cmd_status ;;
+  subs-get)      cmd_subs_get ;;
+  subs-set)      cmd_subs_set "$@" ;;
+  happ-import)   cmd_happ_import "$@" ;;
+  domains-get)   cmd_domains_get ;;
+  domains-set)   cmd_domains_set "$@" ;;
+  apps-list)     cmd_apps_list ;;
+  apps-set)      cmd_apps_set "$@" ;;
+  proxy-get)     cmd_proxy_get ;;
+  proxy-set)     cmd_proxy_set "$@" ;;
+  toggle)        cmd_toggle "$@" ;;
+  update)        spawn_detached "$SERVICE" update; echo "OK: обновление нод запущено" ;;
+  restart)       spawn_detached "$SERVICE" restart; echo "OK: перезапуск запущен" ;;
+  log)           cmd_log "$@" ;;
+  *) echo "Команды: status, subs-get/set, happ-import, domains-get/set, apps-list/set, proxy-get/set, toggle 0|1, update, restart, log" ;;
+esac

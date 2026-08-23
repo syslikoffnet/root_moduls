@@ -50,6 +50,8 @@ for proc in /proc/[0-9]*; do
 done
 [ -f "$MODDIR/warp-tunnel.sh" ] && sh "$MODDIR/warp-tunnel.sh" stop 2>/dev/null
 sh "$MODDIR/vpn-routing.sh" cleanup 2>/dev/null
+[ -x "$MODDIR/geo/service.sh" ] && sh "$MODDIR/geo/service.sh" stop 2>/dev/null
+[ -x "$MODDIR/geo/uninstall.sh" ] && sh "$MODDIR/geo/uninstall.sh" 2>/dev/null
 
 IPT="iptables -w 5"
 IP6T="ip6tables -w 5"

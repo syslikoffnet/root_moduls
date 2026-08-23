@@ -1353,3 +1353,16 @@ if [ "${LOG_EXPORT_ON_BOOT:-0}" = "1" ] && [ -x "$MODDIR/log-export.sh" ]; then
     sh "$MODDIR/log-export.sh" once >/dev/null 2>&1 &
   fi
 fi
+
+# ------------------------------------------------------------------------------
+# Гео-прокси (sing-box, без TUN): стартует после основной службы. Отдельный
+# watchdog внутри geo/service.sh сам следит за нодами и правилами (fail-open).
+# ------------------------------------------------------------------------------
+if [ -x "$MODDIR/geo/service.sh" ] && [ ! -f /data/adb/geo-unblock/disabled ]; then
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh "$MODDIR/geo/service.sh" start-geo </dev/null >/dev/null 2>&1 &
+  else
+    sh "$MODDIR/geo/service.sh" start-geo </dev/null >/dev/null 2>&1 &
+  fi
+  log_i "Гео-прокси (geo/service.sh) запущен в фоне"
+fi
