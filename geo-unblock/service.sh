@@ -804,5 +804,6 @@ case "${1:-boot}" in
     ;;
   apply)   apply_rules tproxy || apply_rules redirect ;;
   status)  status ;;
+  class)   network_class ;;
   *) echo "Использование: $0 [start|stop|restart|update|status|apply]"; exit 2 ;;
 esac

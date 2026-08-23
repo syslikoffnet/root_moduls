@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Geo Unblock</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--card2:#1c2129;--tx:#e6edf3;--mut:#8b949e;--acc:#4f8cff;--ok:#3fb950;--warn:#d29922;--err:#f85149;--bd:#30363d;--rad:14px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;padding-bottom:40px}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,#0d1117f2,#0d1117cc);backdrop-filter:blur(8px);border-bottom:1px solid var(--bd);padding:14px 16px 10px}
+h1{font-size:19px;margin:0 0 2px;display:flex;align-items:center;gap:8px}
+h1 .dot{width:10px;height:10px;border-radius:50%;background:var(--mut);box-shadow:0 0 8px transparent}
+h1 .dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+h1 .dot.bad{background:var(--err);box-shadow:0 0 10px var(--err)}
+.sub{color:var(--mut);font-size:12.5px}
+nav{display:flex;gap:6px;margin-top:10px;overflow-x:auto}
+nav button{flex:1;background:var(--card);color:var(--mut);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;font-size:13.5px;white-space:nowrap}
+nav button.on{color:var(--tx);border-color:var(--acc);background:#1b2636}
+main{padding:14px 16px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:var(--rad);padding:14px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:15px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #21262d;font-size:14px}
+.row:last-child{border-bottom:0}
+.row b{font-weight:600}
+.mut{color:var(--mut)} .ok{color:var(--ok)} .bad{color:var(--err)} .warn{color:var(--warn)}
+.pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;border:1px solid var(--bd);color:var(--mut)}
+.pill.ok{border-color:var(--ok);color:var(--ok)} .pill.bad{border-color:var(--err);color:var(--err)}
+textarea{width:100%;min-height:150px;background:var(--card2);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:10px;font:12.5px/1.5 ui-monospace,monospace;resize:vertical}
+input[type=text],select{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:10px;font-size:14px}
+.btn{display:inline-block;background:var(--acc);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-size:14px;font-weight:600;margin:8px 6px 0 0}
+.btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--bd)}
+.btn.danger{background:#3d1d20;color:var(--err);border:1px solid #6e2a2e}
+.btn[disabled]{opacity:.55}
+.hint{color:var(--mut);font-size:12.5px;margin-top:6px}
+.seg{display:flex;border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin:8px 0}
+.seg button{flex:1;background:var(--card2);color:var(--mut);border:0;padding:10px 4px;font-size:13px}
+.seg button.on{background:#1b2636;color:var(--tx);font-weight:600}
+#appsBox{max-height:340px;overflow:auto;border:1px solid var(--bd);border-radius:10px;margin-top:8px}
+.app{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #21262d;font-size:13.5px}
+.app input{width:18px;height:18px;accent-color:var(--acc)}
+.app .pu{color:var(--mut);font-size:11.5px;margin-left:auto;font-family:ui-monospace,monospace}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#211f2b;border:1px solid var(--bd);color:var(--tx);padding:10px 18px;border-radius:12px;font-size:13.5px;opacity:0;transition:.25s;max-width:90vw;z-index:50;pointer-events:none}
+#toast.show{opacity:1;transform:translateX(-50%)}
+.hide{display:none!important}
+footer{text-align:center;color:var(--mut);font-size:12px;padding:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot" id="dot"></span> Geo Unblock <span class="pill" id="modePill">…</span></h1>
+  <div class="sub" id="subLine">точечный обход гео-блокировок · без TUN · fail-open</div>
+  <nav>
+    <button data-t="status" class="on">Статус</button>
+    <button data-t="subs">Подписки</button>
+    <button data-t="apps">Приложения</button>
+    <button data-t="domains">Домены</button>
+    <button data-t="about">Инфо</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-status">
+    <div class="card"><h3>Состояние</h3>
+      <div class="row"><span class="mut">Служба</span><b id="sState">—</b></div>
+      <div class="row"><span class="mut">Прокси-режим</span><b id="sProxy">—</b></div>
+      <div class="row"><span class="mut">Сеть сейчас</span><b id="sClass">—</b></div>
+      <div class="row"><span class="mut">Нод в urltest</span><b id="sNodes">—</b></div>
+      <div class="row"><span class="mut">Проверка прокси</span><b id="sHealth">—</b></div>
+      <div class="row"><span class="mut">Правила</span><b id="sRules">—</b></div>
+      <div class="row"><span class="mut">Отбор приложений</span><b id="sApps">—</b></div>
+      <div style="margin-top:10px">
+        <button class="btn" id="bRefresh">Обновить</button>
+        <button class="btn sec" id="bRestart">Перезапуск</button>
+        <button class="btn sec" id="bToggle">Выключить</button>
+      </div>
+    </div>
+    <div class="card"><h3>Лог</h3>
+      <button class="btn sec" id="bLog" style="margin-top:0">Показать последние события</button>
+      <pre id="logBox" class="hide" style="background:var(--card2);border:1px solid var(--bd);border-radius:10px;padding:10px;font-size:11.5px;overflow:auto;max-height:300px;margin-top:8px"></pre>
+    </div>
+  </section>
+
+  <section id="tab-subs" class="hide">
+    <div class="card"><h3>Импорт из Happ</h3>
+      <div class="hint" style="margin:0 0 8px">Скопируйте в Happ ссылку подписки (или сами строки vless://) и вставьте ниже. Base64-подписки понимаются автоматически.</div>
+      <select id="impClass">
+        <option value="all">Класс: все сети</option>
+        <option value="wifi">Класс: Wi-Fi</option>
+        <option value="mobile">Класс: мобильная</option>
+      </select>
+      <textarea id="impData" style="min-height:90px;margin-top:8px" placeholder="https://ваша-подписка...&#10;или строки vless:// ss:// hysteria2:// trojan://"></textarea>
+      <button class="btn" id="bImport">Импортировать</button>
+    </div>
+    <div class="card"><h3>Подписки (класс + URL)</h3>
+      <textarea id="subsText" spellcheck="false"></textarea>
+      <button class="btn" id="bSubsSave">Сохранить и обновить ноды</button>
+      <div class="hint">wifi — на Wi-Fi, mobile — на мобильной, all — всегда. Кэш нод обновляется каждые 6 ч.</div>
+    </div>
+    <div class="card"><h3>Свой прокси (приоритетнее подписок)</h3>
+      <input type="text" id="proxyUri" placeholder="vless://... или ss://... (пусто = только подписки)">
+      <button class="btn" id="bProxySave">Сохранить</button>
+      <div class="hint">Публичные ноды видят трафик к доменам из списка — для чувствительного укажите свой сервер.</div>
+    </div>
+  </section>
+
+  <section id="tab-apps" class="hide">
+    <div class="card"><h3>На какие приложения действует</h3>
+      <div class="seg" id="appModeSeg">
+        <button data-m="all">Все (кроме root)</button>
+        <button data-m="exclude">Все, кроме выбранных</button>
+        <button data-m="include">Только выбранные</button>
+      </div>
+      <input type="text" id="appSearch" placeholder="Поиск пакета…">
+      <div id="appsBox"></div>
+      <button class="btn" id="bAppsSave">Применить</button>
+      <button class="btn sec" id="bAppsReload">Обновить список</button>
+      <div class="hint">exclude — удобно для банков/госуслуг; include — минимальная нагрузка: проксируется только то, что нужно. Батарея: include экономичнее всего.</div>
+    </div>
+  </section>
+
+  <section id="tab-domains" class="hide">
+    <div class="card"><h3>Домены геоблока (в прокси)</h3>
+      <textarea id="domText" spellcheck="false"></textarea>
+      <button class="btn" id="bDomSave">Сохранить</button>
+      <div class="hint">DPI-блокировки (YouTube и т.п.) сюда класть не нужно — их лечит zapret2. Изменения применяются сами за ~90 сек.</div>
+    </div>
+  </section>
+
+  <section id="tab-about" class="hide">
+    <div class="card"><h3>О модуле</h3>
+      <div class="row"><span class="mut">Версия</span><b id="aVer">—</b></div>
+      <div class="row"><span class="mut">Бинарник</span><b id="aBin">—</b></div>
+      <div class="row"><span class="mut">Ручных нод</span><b id="aManual">—</b></div>
+      <div class="hint">sing-box в TPROXY/REDIRECT (без TUN). Рунет и DPI-обход zapret2 не затрагиваются. Сбой всех нод → правила снимаются мгновенно, интернет прямой (fail-open). Экономия батареи: urltest спит при простое, проверка здоровья раз в 90 с, никаких цикличных опросов сети.</div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<footer>geo-unblock · companion для zapret2-android</footer>
+<script>
+'use strict';
+const MODDIR='/data/adb/modules/geo-unblock';
+const CTRL=MODDIR+'/bin/geo-control';
+function shellQuote(s){return "'"+String(s).replace(/'/g,"'\\''")+"'"}
+let toastTimer=0;
+function toast(m){const t=document.getElementById('toast');t.textContent=m||'';t.classList.toggle('show',!!m);clearTimeout(toastTimer);if(m)toastTimer=setTimeout(()=>t.classList.remove('show'),3500)}
+function exec(cmd){ // мост KernelSU/APatch/MMRL/Magisk; HTTP не используется
+  const k=window.ksu||window.KernelSU||window.apatch||window.mmrl||window.magisk;
+  if(!k||typeof k.exec!=='function')return Promise.reject(new Error('Откройте WebUI через менеджер (KernelSU/APatch)'));
+  return new Promise((resolve,reject)=>{
+    const id='__cb'+(exec.seq=(exec.seq||0)+1);let done=false;
+    const timer=setTimeout(()=>{if(!done){done=true;delete window[id];reject(new Error('Таймаут команды'))}},45000);
+    window[id]=(code,out,err)=>{if(done)return;done=true;clearTimeout(timer);delete window[id];
+      const c=Number(code??0);c===0?resolve(String(out??'')):reject(new Error(String(err||('rc='+c))))};
+    try{const r=k.exec(cmd,'window.'+id);
+      if(r&&typeof r.then==='function')r.then(res=>{if(!done){done=true;clearTimeout(timer);delete window[id];resolve(typeof res==='string'?res:String(res?.stdout??''))}}).catch(e=>{if(!done){done=true;clearTimeout(timer);delete window[id];reject(e)}});
+    }catch(e){ if(!done){done=true;clearTimeout(timer);delete window[id];
+      try{const s=k.exec(cmd);resolve(typeof s==='string'?s:String(s?.stdout??''))}catch(e2){reject(e2)}}}
+  });
+}
+function control(action,...args){
+  const full=shellQuote(CTRL)+' '+[action,...args].map(shellQuote).join(' ');
+  return exec(full);
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function j(action,...args){return JSON.parse(await control(action,...args))}
+
+/* ---------- вкладки ---------- */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['status','subs','apps','domains','about'].forEach(t=>document.getElementById('tab-'+t).classList.toggle('hide',t!==b.dataset.t));
+  if(b.dataset.t==='subs')loadSubs();
+  if(b.dataset.t==='apps')loadApps();
+  if(b.dataset.t==='domains')loadDomains();
+});
+
+/* ---------- статус ---------- */
+async function loadStatus(){
+  try{
+    const s=await j('status');
+    const dot=document.getElementById('dot');
+    const good=s.state==='running'&&s.health==='OK';
+    dot.className='dot '+(good?'ok':(s.state==='running'?'bad':''));
+    document.getElementById('modePill').textContent=s.proxy_mode==='auto'?'авто-ноды':'свой прокси';
+    document.getElementById('sState').textContent=s.state||'—';
+    document.getElementById('sState').className=s.state==='running'?'ok':'';
+    document.getElementById('sProxy').textContent=s.proxy_mode==='auto'?('urltest, '+s.nodes+' нод'):'manual';
+    document.getElementById('sClass').textContent=({wifi:'Wi-Fi',mobile:'мобильная',all:'другая/VPN',unknown:'?'}[s.class_now]||s.class_now);
+    document.getElementById('sHealth').textContent=s.health==='OK'?'работает':'нет ответа';
+    document.getElementById('sHealth').className=s.health==='OK'?'ok':'bad';
+    document.getElementById('sRules').textContent=s.rules&&s.rules!=='none'?s.rules:'нет';
+    document.getElementById('sApps').textContent=({all:'все приложения',exclude:'все, кроме выбранных',include:'только выбранные'}[s.apps_mode]||s.apps_mode)+(s.apps_selected?' ('+s.apps_selected+')':'');
+    document.getElementById('aVer').textContent=s.version;
+    document.getElementById('aBin').textContent=s.binary==='ok'?'sing-box установлен':'не установлен';
+    document.getElementById('aManual').textContent=s.manual_nodes;
+    document.getElementById('bToggle').textContent=s.state==='stopped'?'Включить':'Выключить';
+    document.getElementById('bToggle').dataset.v=s.state==='stopped'?'1':'0';
+  }catch(e){toast('Статус: '+e.message)}
+}
+document.getElementById('bRefresh').onclick=()=>{loadStatus();toast('Обновлено')};
+document.getElementById('bRestart').onclick=async()=>{toast('Перезапуск…');try{toast(await control('restart'))}catch(e){toast('Ошибка: '+e.message)}setTimeout(loadStatus,2500)};
+document.getElementById('bToggle').onclick=async ev=>{try{toast(await control('toggle',ev.target.dataset.v))}catch(e){toast('Ошибка: '+e.message)}setTimeout(loadStatus,3000)};
+document.getElementById('bLog').onclick=async()=>{
+  const box=document.getElementById('logBox');box.classList.remove('hide');
+  try{box.textContent=await control('log','60')}catch(e){box.textContent='Ошибка: '+e.message}};
+
+/* ---------- подписки ---------- */
+async function loadSubs(){
+  try{
+    document.getElementById('subsText').value=await control('subs-get');
+    document.getElementById('proxyUri').value=await control('proxy-get');
+  }catch(e){toast('Подписки: '+e.message)}
+}
+document.getElementById('bSubsSave').onclick=async()=>{
+  try{toast(await control('subs-set',document.getElementById('subsText').value))}catch(e){toast('Ошибка: '+e.message)}};
+document.getElementById('bProxySave').onclick=async()=>{
+  try{toast(await control('proxy-set',document.getElementById('proxyUri').value.trim()))}catch(e){toast('Ошибка: '+e.message)}};
+document.getElementById('bImport').onclick=async()=>{
+  const cls=document.getElementById('impClass').value,data=document.getElementById('impData').value.trim();
+  if(!data){toast('Вставьте ссылку или строки ссылок');return}
+  try{toast(await control('happ-import',cls,data));document.getElementById('impData').value=''}catch(e){toast('Ошибка: '+e.message)}};
+
+/* ---------- домены ---------- */
+async function loadDomains(){try{document.getElementById('domText').value=await control('domains-get')}catch(e){toast('Домены: '+e.message)}}
+document.getElementById('bDomSave').onclick=async()=>{
+  try{toast(await control('domains-set',document.getElementById('domText').value))}catch(e){toast('Ошибка: '+e.message)}};
+
+/* ---------- приложения ---------- */
+let appsCache=null,appsMode='all',appsSelected=new Set();
+async function loadApps(){
+  try{
+    appsCache=await j('apps-list');appsMode=appsCache.mode;appsSelected=new Set(appsCache.selected);
+    renderApps();
+  }catch(e){toast('Приложения: '+e.message)}
+}
+function renderApps(){
+  document.querySelectorAll('#appModeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===appsMode));
+  const q=document.getElementById('appSearch').value.trim().toLowerCase();
+  const box=document.getElementById('appsBox');box.innerHTML='';
+  if(!appsCache)return;
+  appsCache.apps.filter(a=>!q||a.p.toLowerCase().includes(q)).forEach(a=>{
+    const d=document.createElement('label');d.className='app';
+    const cb=document.createElement('input');cb.type='checkbox';cb.checked=appsSelected.has(a.u);
+    cb.onchange=()=>{cb.checked?appsSelected.add(a.u):appsSelected.delete(a.u)};
+    const sp=document.createElement('span');sp.textContent=a.p;
+    const u=document.createElement('span');u.className='pu';u.textContent='uid '+a.u;
+    d.append(cb,sp,u);box.appendChild(d);
+  });
+  if(!box.children.length)box.innerHTML='<div class="app mut">Ничего не найдено</div>';
+}
+document.querySelectorAll('#appModeSeg button').forEach(b=>b.onclick=()=>{appsMode=b.dataset.m;renderApps()});
+document.getElementById('appSearch').oninput=renderApps;
+document.getElementById('bAppsReload').onclick=loadApps;
+document.getElementById('bAppsSave').onclick=async()=>{
+  try{toast(await control('apps-set',appsMode,[...appsSelected].join(',')))}catch(e){toast('Ошибка: '+e.message)}
+  setTimeout(loadStatus,2500);
+};
+
+loadStatus();setInterval(loadStatus,30000);
+</script>
+</body>
+</html>
