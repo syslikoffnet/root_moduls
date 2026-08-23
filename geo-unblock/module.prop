@@ -1,0 +1,7 @@
+id=geo-unblock
+name=Geo Unblock eCubz (VLESS/SS TPROXY, no TUN)
+version=v0.1.0
+versionCode=10
+author=eCubz collection (companion for zapret2-android)
+description=Точечный обход ГЕО-блокировок (ChatGPT, Spotify, Notion и др.) через ваш VLESS/Shadowsocks прокси: sing-box в режиме TPROXY/REDIRECT без TUN-интерфейса. В прокси уходят ТОЛЬКО домены из /data/adb/geo-unblock/domains.list — весь остальной трафик (рунет, DPI-обход zapret2) идёт напрямую, без изменения. Fail-open: любая поломка прокси мгновенно возвращает прямой маршрут. Требует zapret2-android (r5+) с бандлом curl.
+updateJson=
