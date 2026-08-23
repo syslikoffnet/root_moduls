@@ -32,6 +32,9 @@ SUBS="$DATA_DIR/subscriptions.list"
 PROXY_URI_FILE="$DATA_DIR/proxy.uri"
 PROXY_JSON_FILE="$DATA_DIR/proxy.outbound.json"
 DISABLE_FLAG="$DATA_DIR/disabled"
+APPS_MODE_FILE="$DATA_DIR/apps.mode"
+APPS_LIST_FILE="$DATA_DIR/apps.list"
+MANUAL_NODES="$DATA_DIR/nodes-manual.list"
 RUN="$MODDIR/run"
 WORK="$RUN/singbox"
 LOG_DIR="$MODDIR/logs"
@@ -47,9 +50,9 @@ MARK_TPROXY=0x2
 MARK_FULL=0x40000002
 TABLE=2025
 RULE_PREF=30000
-HEALTH_INTERVAL=45
-FAIL_THRESHOLD=2
-MAX_NODES=60
+HEALTH_INTERVAL=90
+FAIL_THRESHOLD=3
+MAX_NODES=40
 SUB_REFRESH_SEC=21600
 TEST_URL="https://cp.cloudflare.com/generate_204"
 Z2_CURL=/data/adb/modules/zapret2-android/bin/curl
@@ -139,8 +142,17 @@ refresh_nodes() {
     case "$url" in http://*|https://*) ;; *) continue ;; esac
     raw=$(fetch_url "$url")
     if [ -n "$raw" ]; then
-      count=$(printf '%s' "$raw" | extract_uris | tee -a "$tmp_all.$cls" | wc -l)
-      log_i "подписка [$cls] $url: нод $count"
+      uris=$(printf '%s' "$raw" | extract_uris)
+      if [ -z "$uris" ]; then
+        # формат подписки Happ/панелей: весь ответ — base64 от списка ссылок
+        uris=$(printf '%s' "$raw" | tr -d '\n\r' | base64 -d 2>/dev/null | extract_uris)
+      fi
+      if [ -n "$uris" ]; then
+        count=$(printf '%s' "$uris" | tee -a "$tmp_all.$cls" | wc -l)
+        log_i "подписка [$cls] $url: нод $count"
+      else
+        log_w "подписка [$cls] $url: ссылок vless/ss/hysteria2/trojan не найдено"
+      fi
     else
       log_w "подписка [$cls] $url не скачалась (сохраняю старый кэш)"
     fi
@@ -163,7 +175,20 @@ nodes_for_class() {
     wifi) cat "$DATA_DIR/nodes-wifi.list" "$DATA_DIR/nodes-all.list" 2>/dev/null ;;
     mobile) cat "$DATA_DIR/nodes-mobile.list" "$DATA_DIR/nodes-all.list" 2>/dev/null ;;
     *) cat "$DATA_DIR/nodes-wifi.list" "$DATA_DIR/nodes-mobile.list" "$DATA_DIR/nodes-all.list" 2>/dev/null ;;
-  esac | awk 'NF && !seen[$0]++' | head -n "$MAX_NODES"
+  esac | cat - "$MANUAL_NODES" 2>/dev/null | awk 'NF && !seen[$0]++' | head -n "$MAX_NODES"
+}
+
+# Режим отбора приложений: all | exclude | include. apps.list — UID'ы.
+app_mode() {
+  local m
+  m=$(cat "$APPS_MODE_FILE" 2>/dev/null)
+  case "$m" in all|exclude|include) printf '%s' "$m" ;; *) printf 'all' ;; esac
+}
+app_uids() {
+  awk 'NF && !seen[$0]++' "$APPS_LIST_FILE" 2>/dev/null | while IFS= read -r u; do
+    case "$u" in ''|*[!0-9]*) continue ;; esac
+    [ "$u" -le 65535 ] 2>/dev/null && printf '%s\n' "$u"
+  done
 }
 
 # ------------------------------------------------------------------------------
@@ -422,7 +447,7 @@ EOU
     [ "$skip_cnt" -gt 0 ] && log_i "нод разобрано $ok_cnt, пропущено $skip_cnt (vmess/xhttp/битые)"
     tags=${tags%,}
     {
-      printf '{"type":"urltest","tag":"proxy","outbounds":[%s],"url":"%s","interval":"90s","tolerance":80,"idle_timeout":"5m"},\n' "$tags" "$TEST_URL"
+      printf '{"type":"urltest","tag":"proxy","outbounds":[%s],"url":"%s","interval":"300s","tolerance":150,"idle_timeout":"2m"},\n' "$tags" "$TEST_URL"
       cat "$outbounds"
       printf ',\n{"type":"direct","tag":"direct"}\n'
     } > "$outbounds.new"
@@ -513,6 +538,7 @@ stop_core() {
 GEO_OUT=GEO_OUT_CHAIN
 GEO_TPR=GEO_TPROXY_CHAIN
 GEO_RDR=GEO_REDIRECT_CHAIN
+GEO_GRD=GEO_GUARD_CHAIN
 
 cleanup_rules() {
   ipt4 -t mangle -D OUTPUT -j "$GEO_OUT"
@@ -530,6 +556,8 @@ cleanup_rules() {
   # разрешение помеченному трафику раньше QUIC-REJECT zapret2 (hysteria2/UDP443)
   ipt4 -t filter -D OUTPUT -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
   ipt6 -t filter -D OUTPUT -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
+  ipt4 -t filter -D OUTPUT -j "$GEO_GRD"
+  ipt4 -t filter -F "$GEO_GRD" 2>/dev/null; ipt4 -t filter -X "$GEO_GRD" 2>/dev/null
   "$IP_BIN" -4 rule del pref "$RULE_PREF" fwmark "$MARK_TPROXY/$MARK_TPROXY" 2>/dev/null
   "$IP_BIN" -6 rule del pref "$RULE_PREF" fwmark "$MARK_TPROXY/$MARK_TPROXY" 2>/dev/null
   "$IP_BIN" -4 route flush table "$TABLE" 2>/dev/null
@@ -543,6 +571,11 @@ apply_rules() {
   # zapret2: иначе QUIC-REJECT ронял бы hysteria2-ноды на UDP/443.
   ipt4 -t filter -I OUTPUT 1 -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
   ipt6 -t filter -I OUTPUT 1 -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
+  # mixed-порт 127.0.0.1:7890 доступен только root-скриптам модуля:
+  # без этого любое приложение могло бы пользоваться вашим прокси бесплатно.
+  ipt4 -t filter -N "$GEO_GRD" 2>/dev/null
+  ipt4 -t filter -A "$GEO_GRD" -p tcp -d 127.0.0.1 --dport "$MIXED_PORT" -m owner ! --uid-owner 0 -j REJECT
+  ipt4 -t filter -I OUTPUT 1 -j "$GEO_GRD"
 
   local mark="$MARK_FULL"
   [ "$1" = redirect ] && mark="$MARK_SKIP"
@@ -552,12 +585,34 @@ apply_rules() {
     ipt4 -t mangle -A "$GEO_OUT" -d "$dst" -j RETURN
   done
   ipt4 -t mangle -A "$GEO_OUT" -o "${WARP_DEV:-awg99}" -j RETURN
-  ipt4 -t mangle -A "$GEO_OUT" -p tcp -m multiport --dports 80,443 -m owner ! --uid-owner 0 -m mark --mark 0 -j MARK --set-mark "$mark"
+  local amode uids u
+  amode=$(app_mode)
+  uids=$(app_uids)
+  if [ "$amode" = exclude ]; then
+    for u in $uids; do ipt4 -t mangle -A "$GEO_OUT" -m owner --uid-owner "$u" -j RETURN; done
+  fi
+  if [ "$amode" = include ]; then
+    for u in $uids; do
+      ipt4 -t mangle -A "$GEO_OUT" -p tcp -m multiport --dports 80,443 -m owner --uid-owner "$u" -m mark --mark 0 -j MARK --set-mark "$mark"
+    done
+    [ -n "$uids" ] || log_w "режим include с пустым списком: ни одно приложение не проксируется"
+  else
+    ipt4 -t mangle -A "$GEO_OUT" -p tcp -m multiport --dports 80,443 -m owner ! --uid-owner 0 -m mark --mark 0 -j MARK --set-mark "$mark"
+  fi
   ipt4 -t mangle -I OUTPUT 1 -j "$GEO_OUT"
   ipt6 -t mangle -A "$GEO_OUT" -d fc00::/7 -j RETURN 2>/dev/null
   ipt6 -t mangle -A "$GEO_OUT" -d fe80::/10 -j RETURN 2>/dev/null
   ipt6 -t mangle -A "$GEO_OUT" -o "${WARP_DEV:-awg99}" -j RETURN 2>/dev/null
-  ipt6 -t mangle -A "$GEO_OUT" -p tcp -m multiport --dports 80,443 -m owner ! --uid-owner 0 -m mark --mark 0 -j MARK --set-mark "$mark" 2>/dev/null
+  if [ "$amode" = exclude ]; then
+    for u in $uids; do ipt6 -t mangle -A "$GEO_OUT" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
+  fi
+  if [ "$amode" = include ]; then
+    for u in $uids; do
+      ipt6 -t mangle -A "$GEO_OUT" -p tcp -m multiport --dports 80,443 -m owner --uid-owner "$u" -m mark --mark 0 -j MARK --set-mark "$mark" 2>/dev/null
+    done
+  else
+    ipt6 -t mangle -A "$GEO_OUT" -p tcp -m multiport --dports 80,443 -m owner ! --uid-owner 0 -m mark --mark 0 -j MARK --set-mark "$mark" 2>/dev/null
+  fi
   ipt6 -t mangle -I OUTPUT 1 -j "$GEO_OUT" 2>/dev/null
 
   if [ "$1" = redirect ]; then
@@ -707,6 +762,7 @@ status() {
   echo "rules_v4=$(ipt4 -t mangle -C OUTPUT -j "$GEO_OUT" 2>/dev/null && echo tproxy || { ipt4 -t nat -C OUTPUT -j "$GEO_RDR" 2>/dev/null && echo redirect || echo no; })"
   echo "domains=$(grep -cvE '^[[:space:]]*(#|$)' "$DOMAINS" 2>/dev/null)"
   echo "subscriptions=$([ -s "$SUBS" ] && echo "$(grep -cvE '^[[:space:]]*(#|$)' "$SUBS")" || echo 0)"
+  echo "apps_mode=$(app_mode) apps_selected=$(wc -l < "$APPS_LIST_FILE" 2>/dev/null || echo 0)"
   echo "binary=$(find_core || echo none)"
   echo "health_now=$(http_via_proxy >/dev/null 2>&1 && echo OK || echo FAIL)"
 }
@@ -729,6 +785,23 @@ case "${1:-boot}" in
     ;;
   stop)    stop_all ;;
   update)  refresh_nodes && echo "OK: кэш обновлён" ;;
+  # import-url <класс> <url>: добавить подписку (кнопка «Импорт из Happ»)
+  import-url)
+    cls="${2:-all}"; urlv="$3"
+    case "$cls" in wifi|mobile|all) ;; *) echo "класс: wifi|mobile|all"; exit 2 ;; esac
+    case "$urlv" in https://*|http://*) ;; *) echo "нужен URL http(s)://"; exit 2 ;; esac
+    printf '%s' "$urlv" | grep -q ' ' && { echo "URL с пробелом"; exit 2; }
+    printf '%s %s\n' "$cls" "$urlv" >> "$SUBS"
+    refresh_nodes >/dev/null 2>&1
+    echo "OK: подписка добавлена, ноды скачаны"
+    ;;
+  # import-raw <текст со ссылками>: вставка ссылок из Happ/подписки вручную
+  import-raw)
+    cnt=$(printf '%s\n' "$2" | extract_uris | tee -a "$MANUAL_NODES" | wc -l)
+    [ "$cnt" -gt 0 ] || { echo "не найдено ссылок vless/ss/hysteria2/trojan"; exit 2; }
+    awk 'NF && !seen[$0]++' "$MANUAL_NODES" > "$MANUAL_NODES.tmp" && mv -f "$MANUAL_NODES.tmp" "$MANUAL_NODES"
+    echo "OK: добавлено ссылок $cnt (применятся после перезапуска)"
+    ;;
   apply)   apply_rules tproxy || apply_rules redirect ;;
   status)  status ;;
   *) echo "Использование: $0 [start|stop|restart|update|status|apply]"; exit 2 ;;
