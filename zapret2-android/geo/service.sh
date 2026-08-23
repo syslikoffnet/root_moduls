@@ -108,20 +108,61 @@ network_class() {
 # Скачивание и парсинг подписок.
 # ------------------------------------------------------------------------------
 fetch_url() {
+  local t=${FETCH_TIMEOUT:-60}
   if [ -x "$Z2_CURL" ]; then
-    CURL_CA_BUNDLE="$Z2_CA" "$Z2_CURL" -sSL --max-time 60 "$1" 2>/dev/null
+    CURL_CA_BUNDLE="$Z2_CA" "$Z2_CURL" -sSL --max-time "$t" "$1" 2>/dev/null
     return
   fi
   if command -v curl >/dev/null 2>&1; then
-    curl -sSL --max-time 60 "$1" 2>/dev/null
+    curl -sSL --max-time "$t" "$1" 2>/dev/null
     return
   fi
   local b
   for b in "$(command -v busybox 2>/dev/null)" /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do
     [ -x "$b" ] || continue
-    "$b" wget -q -T 60 -O - "$1" 2>/dev/null && return 0
+    "$b" wget -q -T "$t" -O - "$1" 2>/dev/null && return 0
     return 1
   done
+  return 1
+}
+
+# Кандидаты источника одной подписки: оригинал -> jsdelivr-зеркало -> GitHub API.
+# raw.githubusercontent.com у ряда российских провайдеров недоступен, поэтому
+# каждый файл тянется по первому работающему каналу из трёх независимых.
+sub_url_candidates() {
+  printf '%s\n' "$1"
+  case "$1" in
+    https://raw.githubusercontent.com/*)
+      local p owner repo rest br path
+      p=${1#https://raw.githubusercontent.com/}
+      owner=${p%%/*}; rest=${p#*/}; repo=${rest%%/*}; rest=${rest#*/}
+      br=${rest%%/*}; path=${rest#*/}
+      [ -n "$owner" ] && [ -n "$repo" ] && [ -n "$br" ] && [ -n "$path" ] && {
+        printf 'https://cdn.jsdelivr.net/gh/%s/%s@%s/%s\n' "$owner" "$repo" "$br" "$path"
+        printf 'API:%s|%s|%s|%s\n' "$owner" "$repo" "$br" "$path"
+      }
+      ;;
+  esac
+}
+
+sub_fetch() { # $1=url -> содержимое файла в stdout (или rc=1)
+  local u raw b64 owner repo br path
+  while IFS= read -r u; do
+    case "$u" in
+      API:*)
+        u=${u#API:}; owner=${u%%|*}; u=${u#*|}; repo=${u%%|*}; u=${u#*|}; br=${u%%|*}; path=${u#*|}
+        raw=$(FETCH_TIMEOUT=15 fetch_url "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$br")
+        b64=$(printf '%s' "$raw" | sed -n 's/.*"content"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\n//g')
+        [ -n "$b64" ] && printf '%s' "$b64" | base64 -d 2>/dev/null && return 0
+        ;;
+      *)
+        raw=$(FETCH_TIMEOUT=15 fetch_url "$u")
+        [ -n "$raw" ] && { printf '%s' "$raw"; return 0; }
+        ;;
+    esac
+  done <<EOC
+$(sub_url_candidates "$1")
+EOC
   return 1
 }
 
@@ -133,6 +174,7 @@ extract_uris() {
 refresh_nodes() {
   local line cls url tmp_all raw count
   [ -s "$SUBS" ] || { log_i "подписки не настроены ($SUBS)"; return 1; }
+  date +%s > "$RUN/last-refresh.ts" 2>/dev/null
   tmp_all="$WORK/subs.$$"
   : > "$tmp_all" 2>/dev/null || return 1
   while IFS= read -r line || [ -n "$line" ]; do
@@ -143,7 +185,7 @@ refresh_nodes() {
     case "$cls" in wifi|mobile|all) ;; *) cls=all; url="$line" ;; esac
     case "$url" in http://*|https://*) ;; *) continue ;; esac
     murl=$(printf '%s' "$url" | sed 's/\?.*//')   # токены подписки не пишем в лог
-    raw=$(fetch_url "$url")
+    raw=$(sub_fetch "$url")
     if [ -n "$raw" ]; then
       uris=$(printf '%s' "$raw" | extract_uris)
       if [ -z "$uris" ]; then
@@ -436,7 +478,13 @@ gen_config() {
     local nodes i=0 ok_cnt=0 skip_cnt=0 tags=""
     nodes=$(nodes_for_class "$NETWORK_CLASS")
     if [ -z "$nodes" ]; then
-      refresh_nodes || true
+      lr=$(cat "$RUN/last-refresh.ts" 2>/dev/null)
+      case "$lr" in ''|*[!0-9]*) lr=0 ;; esac
+      if [ $(( $(now_epoch) - lr )) -ge 600 ] 2>/dev/null; then
+        refresh_nodes || true
+      else
+        log_w "подписки качались менее 10 мин назад — не дёргаю чаще (см. run/last-refresh.ts)"
+      fi
       nodes=$(nodes_for_class "$NETWORK_CLASS")
     fi
     [ -n "$nodes" ] || { log_e "нет нод для класса '$NETWORK_CLASS' (подписки не скачались?)"; return 1; }
@@ -820,7 +868,15 @@ case "${1:-boot}" in
     watchdog
     ;;
   stop)    stop_all ;;
-  update)  refresh_nodes && echo "OK: кэш обновлён" ;;
+  update)
+    refresh_nodes || true
+    if core_alive || rules_present; then
+      cleanup_rules; stop_core
+      start_core && { apply_rules tproxy || apply_rules redirect; }
+      write_state running
+    fi
+    echo "OK: ноды обновлены, движок пересобран"
+    ;;
   # import-url <класс> <url>: добавить подписку (кнопка «Импорт из Happ»)
   import-url)
     cls="${2:-all}"; urlv="$3"

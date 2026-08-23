@@ -213,6 +213,7 @@ textarea.input,input.input,select.input{border-radius:12px!important}
           <button type="button" class="md-button tonal" id="gNodesLoad" onclick="geoNodesLoad()">Загрузить ноды</button>
           <button type="button" class="md-button outlined" id="gPingAll" onclick="geoPingAll()">Пропинговать все</button>
         </div>
+        <p class="hint" id="gCacheInfo" style="margin:0 0 6px"></p>
         <div class="geo-countries" id="gCountries"><div style="grid-column:1/-1;color:var(--c-text-dim,#8b949e);font-size:13px;padding:6px 2px">Нажмите «Загрузить ноды» — покажу страны, флаги и пинг каждой ноды.</div></div>
       </div>
       <div class="card">
@@ -1363,6 +1364,16 @@ async function geoLoad(silent){
     geoPill('gPillHealth',s.health==='OK','Проверка: '+(s.health==='OK'?'ок':'нет ответа'));
     geoPill('gPillApps',null,'Приложения: '+({all:'все',exclude:'кроме выбранных',include:'только выбранные'}[s.apps_mode]||s.apps_mode)+(s.apps_selected?' ('+s.apps_selected+')':''));
     const t=byId('gToggle');if(t){t.textContent=s.state==='stopped'?'Включить':'Выключить';t.dataset.v=s.state==='stopped'?'1':'0'}
+    const ci=byId('gCacheInfo');
+    if(ci){
+      const c=s.cache||{};
+      if((s.subs|0)>0&&(c.wifi|0)+(c.mobile|0)+(c.all|0)===0)
+        ci.textContent='Подписки есть ('+s.subs+'), но ноды ещё не скачаны — нажмите «Обновить ноды сейчас» ниже; каналы: GitHub → jsdelivr → GitHub API.';
+      else if((s.subs|0)===0)
+        ci.textContent='Подписки не настроены — заполните поле ниже или импортируйте из Happ.';
+      else
+        ci.textContent='Кэш нод: Wi-Fi '+(c.wifi|0)+' · мобильных '+(c.mobile|0)+' · общих '+(c.all|0);
+    }
   }catch(e){if(!silent)toast('Гео: '+e.message)}
 }
 async function geoEgress(){

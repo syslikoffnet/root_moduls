@@ -37,8 +37,8 @@ atomic_write() { # $1=file $2=content-file
 cmd_status() {
   local health=FAIL cls="" bin=ok ver
   ver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
-  [ -x "$DATA_DIR/bin/sing-box" ] || [ -x "$MODDIR/bin/sing-box" ] || bin=none
-  cls=$("$MODDIR/service.sh" class 2>/dev/null)
+  [ -x "$DATA_DIR/bin/sing-box" ] || [ -x "$MODDIR/geo/binaries/android-arm64/sing-box" ] || bin=none
+  cls=$(sh "$MODDIR/geo/service.sh" class 2>/dev/null)
   [ -z "$cls" ] && cls=unknown
   if [ -x /data/adb/modules/zapret2-android/bin/curl ]; then
     CURL_CA_BUNDLE=/data/adb/modules/zapret2-android/bin/curl-cacert.pem \
@@ -46,7 +46,7 @@ cmd_status() {
       -x http://127.0.0.1:7890 -o /dev/null -w '%{http_code}' \
       https://cp.cloudflare.com/generate_204 2>/dev/null | grep -q '^2' && health=OK
   fi
-  printf '{"version":"%s","state":"%s","rules":"%s","proxy_mode":"%s","class_now":"%s","class_saved":"%s","nodes":%s,"health":"%s","binary":"%s","apps_mode":"%s","apps_selected":%s,"subs":%s,"domains":%s,"manual_nodes":%s}\n' \
+  printf '{"version":"%s","state":"%s","rules":"%s","proxy_mode":"%s","class_now":"%s","class_saved":"%s","nodes":%s,"health":"%s","binary":"%s","apps_mode":"%s","apps_selected":%s,"subs":%s,"domains":%s,"manual_nodes":%s,"cache":{"wifi":%s,"mobile":%s,"all":%s}}\n' \
     "$(json_escape "${ver:-unknown}")" \
     "$(json_escape "$(sv STATE)")" \
     "$(json_escape "$(sv MODE)")" \
@@ -59,7 +59,10 @@ cmd_status() {
     "$(g0 grep -c . "$DATA_DIR/apps.list")" \
     "$(g0 grep -cvE '^[[:space:]]*(#|$)' "$DATA_DIR/subscriptions.list")" \
     "$(g0 grep -cvE '^[[:space:]]*(#|$)' "$DATA_DIR/domains.list")" \
-    "$(g0 grep -c . "$DATA_DIR/nodes-manual.list")"
+    "$(g0 grep -c . "$DATA_DIR/nodes-manual.list")" \
+    "$(g0 grep -c . "$DATA_DIR/nodes-wifi.list")" \
+    "$(g0 grep -c . "$DATA_DIR/nodes-mobile.list")" \
+    "$(g0 grep -c . "$DATA_DIR/nodes-all.list")"
 }
 
 # ------------------------------------------------------------ подписки ----

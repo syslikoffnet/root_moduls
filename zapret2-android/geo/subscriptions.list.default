@@ -18,3 +18,5 @@ all    https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLA
 all    https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS+All_RUS.txt
 
 # Добавляйте свои источники по той же схеме.
+# Ссылки raw.githubusercontent.com при недоступности автоматически пробуются
+# через зеркало jsdelivr и GitHub API — вручную зеркала прописывать не нужно.
