@@ -10,9 +10,9 @@ MODDIR="${SELF_DIR%/geo/bin}"
 [ -f "$MODDIR/module.prop" ] || MODDIR=/data/adb/modules/zapret2-android
 DATA_DIR=/data/adb/geo-unblock
 SERVICE="$MODDIR/geo/service.sh"
-LOG="$MODDIR/geo/logs/geo-unblock.log"
-STATE_FILE="$MODDIR/geo/run/state.env"
-mkdir -p "$DATA_DIR" "$MODDIR/geo/logs" 2>/dev/null
+LOG="$DATA_DIR/logs/geo-unblock.log"
+STATE_FILE="$DATA_DIR/run/state.env"
+mkdir -p "$DATA_DIR/logs" "$DATA_DIR/run" 2>/dev/null
 
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g'; }
 spawn_detached() {
@@ -176,6 +176,19 @@ cmd_toggle() {
 
 cmd_log() { tail -n "${2:-80}" "$LOG" 2>/dev/null; }
 
+# Страна и IP выхода через прокси (показывается в WebUI)
+cmd_egress() {
+  local out cc ip zc=/data/adb/modules/zapret2-android/bin/curl
+  out=""
+  if [ -x "$zc" ]; then
+    out=$(CURL_CA_BUNDLE=/data/adb/modules/zapret2-android/bin/curl-cacert.pem \
+      "$zc" -s -m 8 -x http://127.0.0.1:7890 https://ipinfo.io/json 2>/dev/null)
+  fi
+  cc=$(printf '%s' "$out" | sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+  ip=$(printf '%s' "$out" | sed -n 's/.*"ip"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+  printf '{"country":"%s","ip":"%s"}\n' "${cc:-?}" "${ip:-?}"
+}
+
 case "$1" in
   status)        cmd_status ;;
   subs-get)      cmd_subs_get ;;
@@ -191,5 +204,6 @@ case "$1" in
   update)        spawn_detached "$SERVICE" update; echo "OK: обновление нод запущено" ;;
   restart)       spawn_detached "$SERVICE" restart; echo "OK: перезапуск запущен" ;;
   log)           cmd_log "$@" ;;
-  *) echo "Команды: status, subs-get/set, happ-import, domains-get/set, apps-list/set, proxy-get/set, toggle 0|1, update, restart, log" ;;
+  egress)        cmd_egress ;;
+  *) echo "Команды: status, egress, subs-get/set, happ-import, domains-get/set, apps-list/set, proxy-get/set, toggle 0|1, update, restart, log" ;;
 esac

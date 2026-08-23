@@ -121,6 +121,25 @@ while :; do
     fi
   fi
 
+  # 1b. Гео-движок: если его watchdog убит (OOM/kill) — поднимаем заново.
+  # Без этого при смерти watchdog'а ноды могли бы остаться в нерабочем
+  # состоянии без fail-open до следующей перезагрузки.
+  if [ -x "$MODDIR/geo/service.sh" ] && [ ! -f /data/adb/geo-unblock/disabled ]      && { [ -x /data/adb/geo-unblock/bin/sing-box ] || [ -x "$MODDIR/bin/sing-box" ]; }; then
+    gwp=$(cat /data/adb/geo-unblock/run/geo-watchdog.pid 2>/dev/null)
+    case "$gwp" in
+      ''|*[!0-9]*) gwp="" ;;
+      *) kill -0 "$gwp" 2>/dev/null || gwp="" ;;
+    esac
+    if [ -z "$gwp" ]; then
+      log INFO "гео: watchdog не найден — перезапускаю geo/service.sh"
+      if command -v setsid >/dev/null 2>&1; then
+        setsid sh "$MODDIR/geo/service.sh" start-geo >/dev/null 2>&1 &
+      else
+        sh "$MODDIR/geo/service.sh" start-geo >/dev/null 2>&1 &
+      fi
+    fi
+  fi
+
   # 2. Дрейф конфигурации: правка в обход inotify (adb push, файловый менеджер,
   #    атомарная замена файла сторонним редактором).
   if [ "$CONFIG_DRIFT_CHECK" = "1" ] && [ -s "$CONFIG_SIG_FILE" ] && ! control_write_recent && ! service_reload_running; then

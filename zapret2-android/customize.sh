@@ -224,6 +224,13 @@ else
 fi
 rm -rf "$MODPATH/META-INF" "$MODPATH/common" 2>/dev/null
 restore_upgrade_data
+if [ -n "$UPGRADE_FROM" ]; then
+  # Гео-движок прежней версии (v5.x) корректно гасим до подмены каталога.
+  if [ -x "$ACTIVE_MODDIR/geo/service.sh" ]; then
+    sh "$ACTIVE_MODDIR/geo/service.sh" stop >/dev/null 2>&1
+    ilog "upgrade: гео-движок прежней версии остановлен"
+  fi
+fi
 if [ -n "$UPGRADE_FROM" ] && [ -f "$MODPATH/zapret2.conf" ]; then
   old_strategy=$(sed -n 's/^STRATEGY_MODE=//p' "$MODPATH/zapret2.conf" | head -n1 | tr -d '"')
   case "$old_strategy" in SIMPLE|AUTO|'') sed -i 's/^STRATEGY_MODE=.*/STRATEGY_MODE="SMART"/' "$MODPATH/zapret2.conf" ;; esac

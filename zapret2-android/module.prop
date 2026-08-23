@@ -1,7 +1,7 @@
 id=zapret2-android
 name=Zapret2 Ultimate by handsgod (AntiDPI + Geo)
-version=v5.0.0
-versionCode=5000
+version=v5.0.1
+versionCode=5001
 author=handsgod
-description=Два движка в одном: обход DPI (nfqws2, YouTube/замедления) + точечный гео-прокси на sing-box (ChatGPT/Spotify/Notion через VLESS/SS/Hysteria2/Trojan с авто-подписками и выбором лучшей ноды по пингу, wifi/mobile). Без TUN. Единый WebUI. Системный обход DPI-блокировок на базе zapret2/nfqws2. Отбор по доменам и подсетям с автообучением, авто-подбор стратегии под сеть, экономия батареи в незаблокированных сетях, туннель WARP для того, что обходом не лечится. Поддержка VPN, Wi-Fi, сотовых сетей и раздачи (Hotspot). Группа: https://t.me/module_ecubz
+description=Два движка в одном модуле: обход DPI (nfqws2 — YouTube, замедления, SMART-подбор стратегии, WARP, раздача) + гео-прокси на sing-box без TUN (ChatGPT/Spotify/Notion через VLESS/SS/Hysteria2/Trojan, авто-подписки, импорт из Happ, лучший пинг по wifi/mobile, отбор приложений). Единый WebUI, fail-open, минимум батареи. Форк zapret2 eCubz, сборка handsgod.
 updateJson=https://raw.githubusercontent.com/syslikoffnet/root_moduls/refs/heads/arena%2F01a02b94-root-moduls/zapret2-android/update.json

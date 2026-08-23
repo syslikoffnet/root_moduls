@@ -35,9 +35,11 @@ DISABLE_FLAG="$DATA_DIR/disabled"
 APPS_MODE_FILE="$DATA_DIR/apps.mode"
 APPS_LIST_FILE="$DATA_DIR/apps.list"
 MANUAL_NODES="$DATA_DIR/nodes-manual.list"
-RUN="$MODDIR/run"
+# Рантим и логи — ВНЕ каталога модуля (переживают обновление, и конфиг с
+# паролями нод не хранится внутри module-dir, доступного на чтение шире).
+RUN="$DATA_DIR/run"
 WORK="$RUN/singbox"
-LOG_DIR="$MODDIR/logs"
+LOG_DIR="$DATA_DIR/logs"
 LOG="$LOG_DIR/geo-unblock.log"
 CORE_PID_FILE="$RUN/singbox.pid"
 STATE_FILE="$RUN/state.env"
@@ -59,7 +61,7 @@ Z2_CURL=/data/adb/modules/zapret2-android/bin/curl
 Z2_CA=/data/adb/modules/zapret2-android/bin/curl-cacert.pem
 
 mkdir -p "$RUN" "$LOG_DIR" "$WORK" 2>/dev/null
-chmod 0700 "$RUN" "$LOG_DIR" "$WORK" 2>/dev/null || true
+chmod 0700 "$DATA_DIR" "$RUN" "$LOG_DIR" "$WORK" 2>/dev/null || true
 [ -f "$DOMAINS" ] || cp -f "$MODDIR/domains.list.default" "$DOMAINS" 2>/dev/null
 [ -f "$SUBS" ] || cp -f "$MODDIR/subscriptions.list.default" "$SUBS" 2>/dev/null
 
@@ -140,6 +142,7 @@ refresh_nodes() {
     url=$(printf '%s' "$line" | awk '{print $2}')
     case "$cls" in wifi|mobile|all) ;; *) cls=all; url="$line" ;; esac
     case "$url" in http://*|https://*) ;; *) continue ;; esac
+    murl=$(printf '%s' "$url" | sed 's/\?.*//')   # токены подписки не пишем в лог
     raw=$(fetch_url "$url")
     if [ -n "$raw" ]; then
       uris=$(printf '%s' "$raw" | extract_uris)
@@ -149,12 +152,12 @@ refresh_nodes() {
       fi
       if [ -n "$uris" ]; then
         count=$(printf '%s' "$uris" | tee -a "$tmp_all.$cls" | wc -l)
-        log_i "подписка [$cls] $url: нод $count"
+        log_i "подписка [$cls] $murl: нод $count"
       else
-        log_w "подписка [$cls] $url: ссылок vless/ss/hysteria2/trojan не найдено"
+        log_w "подписка [$cls] $murl: ссылок vless/ss/hysteria2/trojan не найдено"
       fi
     else
-      log_w "подписка [$cls] $url не скачалась (сохраняю старый кэш)"
+      log_w "подписка [$cls] $murl не скачалась (сохраняю старый кэш)"
     fi
   done < "$SUBS"
   local c total=0

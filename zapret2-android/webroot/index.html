@@ -75,6 +75,26 @@ button:focus-visible,.nav-chip:focus-visible,.control:focus-visible,.switch-labe
 @media (max-width:720px){.shell{padding-left:10px;padding-right:10px}.hero{padding:20px;border-radius:34px}.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand-row{display:block}.hero-badge{margin-top:12px}.card{padding:16px}.grid{grid-template-columns:1fr}.actions .md-button{flex:1 1 170px}.app-row{align-items:flex-start;flex-wrap:wrap}.app-name{flex:1 1 calc(100% - 58px);min-width:0}.app-chip{flex:1 1 calc(33.3% - 5px);justify-content:center}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 </style>
+
+<style>
+.geo-pills{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 12px}
+.geo-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--c-border);font-size:12.5px;color:var(--c-text-dim,#8b949e);background:var(--c-surface2,transparent)}
+.geo-pill b{font-weight:600;color:inherit}
+.geo-pill.ok{border-color:rgba(63,185,80,.55);color:#3fb950}
+.geo-pill.bad{border-color:rgba(248,81,73,.55);color:#f85149}
+.geo-pill.acc{border-color:rgba(79,140,255,.55);color:#4f8cff}
+.geo-seg{display:flex;border:1px solid var(--c-border);border-radius:12px;overflow:hidden;margin:10px 0}
+.geo-seg button{flex:1;padding:10px 6px;border:0;background:transparent;color:var(--c-text-dim,#8b949e);font-size:13px}
+.geo-seg button.on{background:var(--c-accent-soft,rgba(79,140,255,.16));color:var(--c-text,#e6edf3);font-weight:600}
+.geo-apps-head{display:flex;align-items:center;gap:8px;margin-top:8px}
+.geo-apps-head .cnt{font-size:12px;color:var(--c-text-dim,#8b949e)}
+.geo-box{max-height:320px;overflow:auto;border:1px solid var(--c-border);border-radius:12px;margin-top:8px;background:var(--c-surface2,transparent)}
+.geo-app{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--c-border);font-size:13.5px;cursor:pointer}
+.geo-app:last-child{border-bottom:0}
+.geo-app input{width:18px;height:18px;accent-color:#4f8cff}
+.geo-app .uid{margin-left:auto;color:var(--c-text-dim,#8b949e);font-size:11px;font-family:ui-monospace,monospace}
+.geo-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+</style>
 </head>
 <body>
 <div class="shell">
@@ -151,54 +171,69 @@ button:focus-visible,.nav-chip:focus-visible,.control:focus-visible,.switch-labe
 
 <section class="card" id="hotspotSection">
   <section class="section collapsed" id="geoSection">
-      <div class="section-head" onclick="toggleCard('geoSection')"><div class="section-icon">🌍</div><div class="section-head-text"><h2 class="section-title">Гео-прокси (ChatGPT · Spotify · Notion)</h2><p class="section-desc">sing-box без TUN: в прокси — только домены списка, выбранные приложения и лучшая нода по пингу (wifi/mobile). Рунет и DPI-обход не затрагиваются.</p></div><span class="collapse-chevron" aria-hidden="true">▾</span></div>
+      <div class="section-head" onclick="toggleCard('geoSection')"><div class="section-icon">🌍</div><div class="section-head-text"><h2 class="section-title">Гео-прокси · ChatGPT / Spotify / Notion</h2><p class="section-desc">sing-box без TUN: только домены списка, лучшая нода по пингу на текущей сети. Рунет и DPI-обход не затрагиваются.</p></div><span class="collapse-chevron" aria-hidden="true">▾</span></div>
       <div class="section-body">
-      <div class="card"><h3>Состояние гео-прокси</h3>
-        <div class="row"><span>Служба</span><b id="gState">—</b></div>
-        <div class="row"><span>Режим</span><b id="gProxy">—</b></div>
-        <div class="row"><span>Сеть / нод в urltest</span><b id="gClassNodes">—</b></div>
-        <div class="row"><span>Проверка прокси</span><b id="gHealth">—</b></div>
-        <div class="row"><span>Приложения</span><b id="gApps">—</b></div>
-        <div style="margin-top:10px">
-          <button type="button" class="md-button tonal" id="gRefresh" onclick="geoLoad()">Обновить</button>
-          <button type="button" class="md-button outlined" id="gRestart" onclick="geoRestart()">Перезапуск</button>
-          <button type="button" class="md-button outlined" id="gToggle" onclick="geoToggle(this)">Включить</button>
-          <button type="button" class="md-button outlined" id="gLogBtn" onclick="geoLog()">Лог</button>
+      <div class="card">
+        <div class="geo-pills">
+          <span class="geo-pill" id="gPillState">Служба: —</span>
+          <span class="geo-pill" id="gPillNodes">Ноды: —</span>
+          <span class="geo-pill acc" id="gPillEgress">Выход: —</span>
+          <span class="geo-pill" id="gPillHealth">Проверка: —</span>
+          <span class="geo-pill" id="gPillApps">Приложения: —</span>
         </div>
-        <pre id="gLogBox" class="hide" style="background:var(--c-surface2);border:1px solid var(--c-border);border-radius:10px;padding:10px;font-size:11.5px;overflow:auto;max-height:260px;margin-top:8px"></pre>
+        <div class="geo-actions">
+          <button type="button" class="md-button tonal" onclick="geoLoad()">Обновить</button>
+          <button type="button" class="md-button outlined" onclick="geoEgress()">Страна выхода</button>
+          <button type="button" class="md-button outlined" onclick="geoRestart()">Перезапуск</button>
+          <button type="button" class="md-button outlined" id="gToggle" onclick="geoToggle(this)">Выключить</button>
+          <button type="button" class="md-button outlined" onclick="geoLog()">Лог</button>
+        </div>
+        <pre id="gLogBox" class="hide" style="background:var(--c-surface2,transparent);border:1px solid var(--c-border);border-radius:10px;padding:10px;font-size:11.5px;overflow:auto;max-height:260px;margin-top:8px"></pre>
       </div>
-      <div class="card"><h3>Импорт из Happ</h3>
-        <div class="field"><label>Класс сети</label>
-          <select id="gImpClass" class="input">
-            <option value="all">Все сети</option><option value="wifi">Wi-Fi</option><option value="mobile">Мобильная</option>
-          </select>
+      <div class="card"><h3>📥 Импорт из Happ</h3>
+        <div class="geo-seg" id="gImpClassSeg">
+          <button type="button" data-c="all" class="on">Все сети</button>
+          <button type="button" data-c="wifi">Wi-Fi</button>
+          <button type="button" data-c="mobile">Мобильная</button>
         </div>
-        <div class="field"><label>Ссылка подписки или строки vless://…</label>
-          <textarea id="gImpData" class="input" style="min-height:84px;font-family:ui-monospace,monospace;font-size:12px" placeholder="https://подписка… (base64 понимается сам) или vless://…"></textarea>
+        <textarea id="gImpData" class="input" style="min-height:84px;font-family:ui-monospace,monospace;font-size:12px" spellcheck="false" placeholder="https://ваша-подписка… (base64 понимается сам)&#10;или скопированные строки vless://…"></textarea>
+        <div class="geo-actions">
+          <button type="button" class="md-button tonal" id="gImport" onclick="geoImport()">Импортировать</button>
         </div>
-        <button type="button" class="md-button tonal" id="gImport" onclick="geoImport()">Импортировать</button>
+        <p class="hint">Happ → подписка → «Поделиться/копировать» → вставить сюда. Свои строки vless:// станут ручными нодами.</p>
       </div>
-      <div class="card"><h3>Подписки (класс + URL)</h3>
+      <div class="card"><h3>📋 Подписки</h3>
         <textarea id="gSubs" class="input" style="min-height:110px;font-family:ui-monospace,monospace;font-size:12px" spellcheck="false"></textarea>
-        <button type="button" class="md-button tonal" id="gSubsSave" onclick="geoSubsSave()">Сохранить и обновить ноды</button>
-        <button type="button" class="md-button outlined" id="gUpdate" onclick="geoUpdate()">Обновить ноды сейчас</button>
-        <p class="hint">wifi — на Wi-Fi, mobile — на мобильной, all — всегда. Кэш обновляется каждые 6 ч.</p>
-      </div>
-      <div class="card"><h3>Приложения</h3>
-        <div class="seg" style="display:flex;border:1px solid var(--c-border);border-radius:10px;overflow:hidden;margin:8px 0">
-          <button type="button" style="flex:1;padding:9px" id="gmAll" onclick="geoMode('all')">Все</button>
-          <button type="button" style="flex:1;padding:9px" id="gmExclude" onclick="geoMode('exclude')">Все, кроме выбранных</button>
-          <button type="button" style="flex:1;padding:9px" id="gmInclude" onclick="geoMode('include')">Только выбранные</button>
+        <div class="geo-actions">
+          <button type="button" class="md-button tonal" id="gSubsSave" onclick="geoSubsSave()">Сохранить</button>
+          <button type="button" class="md-button outlined" id="gUpdate" onclick="geoUpdate()">Обновить ноды сейчас</button>
         </div>
-        <input type="text" id="gAppSearch" class="input" placeholder="Поиск пакета…" oninput="geoRenderApps()">
-        <div id="gAppsBox" style="max-height:300px;overflow:auto;border:1px solid var(--c-border);border-radius:10px;margin-top:8px"></div>
-        <button type="button" class="md-button tonal" id="gAppsSave" onclick="geoAppsSave()">Применить</button>
-        <p class="hint">«Только выбранные» — самый экономный режим по батарее.</p>
+        <p class="hint">Формат: <code>wifi|mobile|all https://…</code>. Кэш нод обновляется каждые 6 ч.</p>
       </div>
-      <div class="card"><h3>Домены геоблока</h3>
+      <div class="card"><h3>📱 Приложения</h3>
+        <div class="geo-seg" id="gModeSeg">
+          <button type="button" data-m="all">Все</button>
+          <button type="button" data-m="exclude">Все, кроме выбранных</button>
+          <button type="button" data-m="include">Только выбранные</button>
+        </div>
+        <div class="geo-apps-head">
+          <input type="text" id="gAppSearch" class="input" placeholder="Поиск пакета…" oninput="geoRenderApps()" style="margin:0">
+          <span class="cnt" id="gSelCnt">0</span>
+          <button type="button" class="md-button outlined" style="margin:0" onclick="geoClearSel()">Снять</button>
+        </div>
+        <div class="geo-box" id="gAppsBox"></div>
+        <div class="geo-actions">
+          <button type="button" class="md-button tonal" id="gAppsSave" onclick="geoAppsSave()">Применить</button>
+          <button type="button" class="md-button outlined" onclick="geoAppsLoad()">Обновить список</button>
+        </div>
+        <p class="hint">«Только выбранные» — самый экономный режим по батарее (проксируется лишь необходимое).</p>
+      </div>
+      <div class="card"><h3>🌐 Домены геоблока</h3>
         <textarea id="gDomains" class="input" style="min-height:130px;font-family:ui-monospace,monospace;font-size:12px" spellcheck="false"></textarea>
-        <button type="button" class="md-button tonal" id="gDomSave" onclick="geoDomainsSave()">Сохранить</button>
-        <p class="hint">DPI-блокировки (YouTube и т.п.) сюда не добавляйте — их лечит обход выше. Изменения применяются сами ~90 сек.</p>
+        <div class="geo-actions">
+          <button type="button" class="md-button tonal" id="gDomSave" onclick="geoDomainsSave()">Сохранить</button>
+        </div>
+        <p class="hint">DPI-блокировки (YouTube и т.п.) сюда не добавляйте — их лечит AntiDPI выше. Изменения применяются сами ~90 сек.</p>
       </div>
       </div>
     </section>
@@ -1268,68 +1303,88 @@ Promise.all([loadStatus(),loadWarp(),loadHotspot(),loadStrategies(),loadDiagnost
 // ============================== ГЕО-ПРОКСИ (sing-box) ==============================
 function geoControl(action,...args){
   const fullCmd=shellQuote(modDir+'/geo/bin/geo-control')+' '+[action,...args].map(shellQuote).join(' ');
-  return nativeExec(fullCmd,'geo-'+action,...args); // http-мосту отдаём действие с префиксом geo-
+  return nativeExec(fullCmd,'geo-'+action,...args);
 }
-async function geoJ(action,...args){return JSON.parse(await geoControl(action,...args))}
-let geoAppsCache=null,geoModeCur='all',geoSelected=new Set(),geoLoadedOnce=false;
+async function geoJ(a,...args){return JSON.parse(await geoControl(a,...args))}
+let geoAppsCache=null,geoModeCur='all',geoSelected=new Set(),geoImpClass='all';
 
+function geoPill(id,ok,text,cls){
+  const el=byId(id);if(!el)return;
+  el.textContent=text;
+  el.className='geo-pill '+(cls||(ok===null?'':(ok?'ok':'bad')));
+}
 async function geoLoad(silent){
   try{
     const s=await geoJ('status');
-    const set=(id,v,cls)=>{const el=byId(id);if(!el)return;el.textContent=v;el.className=cls||el.className};
-    set('gState',s.state,s.state==='running'?'ok':'bad');
-    set('gProxy',s.proxy_mode==='auto'?('авто · '+s.nodes+' нод'):'своя ссылка');
-    set('gClassNodes',({wifi:'Wi-Fi',mobile:'мобильная',all:'др.'}[s.class_now]||s.class_now)+' / '+(s.nodes||0));
-    set('gHealth',s.health==='OK'?'работает':'нет ответа',s.health==='OK'?'ok':'bad');
-    set('gApps',({all:'все',exclude:'кроме выбранных',include:'только выбранные'}[s.apps_mode]||s.apps_mode)+(s.apps_selected?' ('+s.apps_selected+')':''));
+    geoPill('gPillState',s.state==='running','Служба: '+({running:'работает',stopped:'выключен','no-binary':'нет sing-box','no-proxy':'нет подписок','config-error':'ошибка конфига',degraded:'деградация'}[s.state]||s.state));
+    geoPill('gPillNodes',null,'Ноды: '+(s.proxy_mode==='auto'?(s.nodes+' · '+({wifi:'Wi-Fi',mobile:'мобильная',all:'др.'}[s.class_now]||s.class_now)):'своя ссылка'),s.proxy_mode==='auto'?'acc':'');
+    geoPill('gPillHealth',s.health==='OK','Проверка: '+(s.health==='OK'?'ок':'нет ответа'));
+    geoPill('gPillApps',null,'Приложения: '+({all:'все',exclude:'кроме выбранных',include:'только выбранные'}[s.apps_mode]||s.apps_mode)+(s.apps_selected?' ('+s.apps_selected+')':''));
     const t=byId('gToggle');if(t){t.textContent=s.state==='stopped'?'Включить':'Выключить';t.dataset.v=s.state==='stopped'?'1':'0'}
   }catch(e){if(!silent)toast('Гео: '+e.message)}
 }
+async function geoEgress(){
+  geoPill('gPillEgress',null,'Выход: проверяю…','');
+  try{const e=await geoJ('egress');geoPill('gPillEgress',e.country&&e.country!=='?','Выход: '+(e.country==='?'?'нет ответа':(e.country+' · '+e.ip)),e.country==='RU'?'bad':'acc')}
+  catch(e){geoPill('gPillEgress',false,'Выход: ошибка')}
+}
 async function geoLoadAll(){
-  geoLoad();
+  geoLoad();geoEgress();
   try{byId('gSubs').value=await geoControl('subs-get')}catch(_){}
   try{byId('gDomains').value=await geoControl('domains-get')}catch(_){}
-  try{byId('gProxyUri')?.value==null||0;}catch(_){}
   geoAppsLoad();
 }
-async function geoRestart(){toast('Перезапуск гео-прокси…');try{toast(await geoControl('restart'))}catch(e){toast('Ошибка: '+e.message)}setTimeout(()=>geoLoad(),2500)}
-async function geoToggle(el){try{toast(await geoControl('toggle',el.dataset.v||'0'))}catch(e){toast('Ошибка: '+e.message)}setTimeout(()=>geoLoad(),3000)}
+async function geoRestart(){toast('Перезапуск гео-прокси…');try{toast(await geoControl('restart'))}catch(e){toast('Ошибка: '+e.message)}setTimeout(()=>{geoLoad();geoEgress()},2500)}
+async function geoToggle(el){try{toast(await geoControl('toggle',el.dataset.v||'0'))}catch(e){toast('Ошибка: '+e.message)}setTimeout(()=>{geoLoad()},3000)}
 async function geoLog(){const b=byId('gLogBox');b.classList.remove('hide');try{b.textContent=await geoControl('log','60')}catch(e){b.textContent='Ошибка: '+e.message}}
 async function geoImport(){
-  const cls=byId('gImpClass').value,data=byId('gImpData').value.trim();
+  const data=byId('gImpData').value.trim();
   if(!data){toast('Вставьте ссылку или строки');return}
   await busy('gImport','Импортирую…');
-  try{toast(await geoControl('happ-import',cls,data));byId('gImpData').value='';done('gImport','Импортировано')}catch(e){done('gImport','Ошибка: '+e.message)}
+  try{toast(await geoControl('happ-import',geoImpClass,data));byId('gImpData').value='';done('gImport','Импортировано')}
+  catch(e){done('gImport','Ошибка: '+e.message)}
 }
-async function geoSubsSave(){await busy('gSubsSave','Сохраняю подписки…');try{toast(await geoControl('subs-set',byId('gSubs').value));done('gSubsSave','Сохранено')}catch(e){done('gSubsSave','Ошибка: '+e.message)}}
+async function geoSubsSave(){await busy('gSubsSave','Сохраняю…');try{toast(await geoControl('subs-set',byId('gSubs').value));done('gSubsSave','Подписки сохранены')}catch(e){done('gSubsSave','Ошибка: '+e.message)}}
 async function geoUpdate(){await busy('gUpdate','Обновляю ноды…');try{toast(await geoControl('update'));done('gUpdate','Ноды обновляются')}catch(e){done('gUpdate','Ошибка: '+e.message)}}
-async function geoDomainsSave(){await busy('gDomSave','Сохраняю домены…');try{toast(await geoControl('domains-set',byId('gDomains').value));done('gDomSave','Сохранено')}catch(e){done('gDomSave','Ошибка: '+e.message)}}
+async function geoDomainsSave(){await busy('gDomSave','Сохраняю…');try{toast(await geoControl('domains-set',byId('gDomains').value));done('gDomSave','Домены сохранены')}catch(e){done('gDomSave','Ошибка: '+e.message)}}
 async function geoAppsLoad(){
-  try{geoAppsCache=await geoJ('apps-list');geoModeCur=geoAppsCache.mode;geoSelected=new Set(geoAppsCache.selected);geoRenderApps()}catch(e){toast('Приложения: '+e.message)}
+  try{geoAppsCache=await geoJ('apps-list');geoModeCur=geoAppsCache.mode;geoSelected=new Set(geoAppsCache.selected);geoRenderApps()}
+  catch(e){toast('Приложения: '+e.message)}
 }
-function geoMode(m){geoModeCur=m;geoRenderApps()}
+function geoSegSync(){
+  document.querySelectorAll('#gModeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===geoModeCur));
+  document.querySelectorAll('#gImpClassSeg button').forEach(b=>b.classList.toggle('on',b.dataset.c===geoImpClass));
+}
 function geoRenderApps(){
-  ['All','Exclude','Include'].forEach(k=>{const el=byId('gm'+k);if(el)el.style.background=(geoModeCur===k.toLowerCase())?'var(--c-accent-soft, #1b2636)':'transparent'});
-  const q=(byId('gAppSearch')?.value||'').trim().toLowerCase(),box=byId('gAppsBox');if(!box||!geoAppsCache)return;
+  geoSegSync();
+  const cnt=byId('gSelCnt');if(cnt)cnt.textContent='выбрано '+geoSelected.size;
+  const q=(byId('gAppSearch')?.value||'').trim().toLowerCase(),box=byId('gAppsBox');
+  if(!box||!geoAppsCache)return;
   box.innerHTML='';
+  let shown=0;
   geoAppsCache.apps.filter(a=>!q||a.p.toLowerCase().includes(q)).forEach(a=>{
-    const d=document.createElement('label');d.className='app';d.style.cssText='display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--c-border);font-size:13.5px;cursor:pointer';
+    shown++;
+    const d=document.createElement('label');d.className='geo-app';
     const cb=document.createElement('input');cb.type='checkbox';cb.checked=geoSelected.has(a.u);
-    cb.onchange=()=>{cb.checked?geoSelected.add(a.u):geoSelected.delete(a.u)};
+    cb.onchange=()=>{cb.checked?geoSelected.add(a.u):geoSelected.delete(a.u);const c=byId('gSelCnt');if(c)c.textContent='выбрано '+geoSelected.size};
     const sp=document.createElement('span');sp.textContent=a.p;
-    const u=document.createElement('span');u.textContent='uid '+a.u;u.style.cssText='margin-left:auto;color:var(--c-text-dim,#8b949e);font-size:11px;font-family:ui-monospace,monospace';
+    const u=document.createElement('span');u.className='uid';u.textContent='uid '+a.u;
     d.append(cb,sp,u);box.appendChild(d);
   });
-  if(!box.children.length)box.innerHTML='<div style="padding:10px;color:var(--c-text-dim,#8b949e)">Ничего не найдено</div>';
+  if(!shown)box.innerHTML='<div style="padding:12px;color:var(--c-text-dim,#8b949e)">Ничего не найдено</div>';
 }
+function geoClearSel(){geoSelected.clear();geoRenderApps()}
 async function geoAppsSave(){
   await busy('gAppsSave','Применяю…');
-  try{toast(await geoControl('apps-set',geoModeCur,[...geoSelected].join(',')));done('gAppsSave','Применено')}catch(e){done('gAppsSave','Ошибка: '+e.message)}
+  try{toast(await geoControl('apps-set',geoModeCur,[...geoSelected].join(',')));done('gAppsSave','Применено')}
+  catch(e){done('gAppsSave','Ошибка: '+e.message)}
   setTimeout(()=>geoLoad(),2500);
 }
+document.querySelectorAll('#gImpClassSeg button').forEach(b=>b.onclick=()=>{geoImpClass=b.dataset.c;geoSegSync()});
+document.querySelectorAll('#gModeSeg button').forEach(b=>b.onclick=()=>{geoModeCur=b.dataset.m;geoSegSync()});
 document.querySelector('.nav-chip[data-target="geoSection"]')?.addEventListener('click',()=>setTimeout(()=>{if(!byId('geoSection')?.classList.contains('collapsed'))geoLoadAll()},250));
-if(!byId('geoSection')?.classList.contains('collapsed'))geoLoadAll();else geoLoad(true);
-setInterval(()=>{if(!byId('geoSection')?.classList.contains('collapsed'))geoLoad(true)},30000);
+if(!byId('geoSection')?.classList.contains('collapsed'))geoLoadAll();else{geoLoad(true)}
+setInterval(()=>{if(!byId('geoSection')?.classList.contains('collapsed')){geoLoad(true)}},30000);
 // ============================ конец гео-прокси ============================
 </script>
 </body></html>

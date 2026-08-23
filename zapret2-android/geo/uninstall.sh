@@ -3,7 +3,7 @@
 # (/data/adb/geo-unblock: прокси-ссылка, домены, бинарник) сохраняются.
 umask 077
 MODDIR="${0%/*}"
-RUN="$MODDIR/run"
+RUN="/data/adb/geo-unblock/run"
 
 IPT=$(command -v iptables 2>/dev/null); [ -n "$IPT" ] || IPT=/system/bin/iptables
 IP6T=$(command -v ip6tables 2>/dev/null); [ -n "$IP6T" ] || IP6T=/system/bin/ip6tables
