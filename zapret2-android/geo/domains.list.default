@@ -1,0 +1,54 @@
+# ==============================================================================
+# geo-unblock — домены, уводимые в ваш VLESS/SS прокси (гео-блокировки)
+# ==============================================================================
+# Сюда входят сервисы, которые сами блокируют российские IP (уход из РФ).
+# DPI-блокировки (замедление YouTube и т.п.) лечит zapret2-android — их сюда
+# класть НЕ нужно: двойная обработка не нужна и вредна.
+# Формат: по одному домену в строке; # — комментарий. Совпадают и сам домен,
+# и все его поддомены. Изменения подхватываются автоматически в течение
+# пары минут (перезапуск не нужен).
+#
+# После правки проверьте: su -c "sh /data/adb/modules/geo-unblock/service.sh status"
+
+# --- OpenAI / ChatGPT ---
+openai.com
+chatgpt.com
+ai.com
+oaistatic.com
+oaiusercontent.com
+auth0.com
+cdn.auth0.com
+
+# --- Anthropic / Claude ---
+anthropic.com
+claude.ai
+
+# --- xAI / Grok ---
+x.ai
+grok.com
+
+# --- Spotify ---
+spotify.com
+scdn.co
+spotifycdn.com
+
+# --- Notion ---
+notion.so
+notion.com
+notion.site
+notion.new
+notion-static.com
+
+# --- Прочие сервисы, блокирующие РФ-IP ---
+midjourney.com
+poe.com
+elevenlabs.io
+suno.com
+suno.ai
+perplexity.ai
+
+# --- Раскомментируйте при необходимости ---
+# huggingface.co
+# midport.com
+# figma.com
+# dewoscope.com

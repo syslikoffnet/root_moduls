@@ -1,0 +1,20 @@
+# ==============================================================================
+# geo-unblock — подписки с бесплатными нодами (обновление каждые 6 часов,
+# вручную: su -c "sh /data/adb/modules/geo-unblock/service.sh update")
+# ==============================================================================
+# Формат строки: <класс> <URL>          класс: wifi | mobile | all
+#   wifi   — ноды, заточенные под Wi-Fi/провайдных DPI (используются на Wi-Fi)
+#   mobile — ноды для мобильных сетей (используются на LTE/5G)
+#   all    — используются всегда, на любой сети
+# Ноды текущего класса попадают в urltest-группу sing-box: задержка меряется
+# через ТЕКУЩУЮ сеть, подключение — к лучшей живой ноде.
+#
+# Источник по умолчанию: github.com/igareck/vpn-configs-for-russia
+# (публичные бесплатные ноды — см. предупреждение о доверии в README.md)
+
+wifi   https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt
+mobile https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt
+all    https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt
+all    https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS+All_RUS.txt
+
+# Добавляйте свои источники по той же схеме.

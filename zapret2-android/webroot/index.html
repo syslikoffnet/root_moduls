@@ -95,6 +95,40 @@ button:focus-visible,.nav-chip:focus-visible,.control:focus-visible,.switch-labe
 .geo-app .uid{margin-left:auto;color:var(--c-text-dim,#8b949e);font-size:11px;font-family:ui-monospace,monospace}
 .geo-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 </style>
+
+<style>
+/* ===== Тема-полировка всего интерфейса (v5.1) ===== */
+body{background:radial-gradient(1100px 700px at 50% -220px,#15263a 0%,#0d1117 60%)!important}
+.card{border-radius:18px!important;box-shadow:0 10px 28px rgba(0,0,0,.38);border-color:#252d3a!important;transition:box-shadow .2s}
+.card:hover{box-shadow:0 14px 34px rgba(0,0,0,.46)}
+.md-button{border-radius:13px!important;font-weight:600!important;letter-spacing:.2px;transition:transform .12s, box-shadow .2s}
+.md-button:active{transform:scale(.97)}
+.md-button.tonal{box-shadow:0 4px 14px rgba(79,140,255,.25)}
+.nav-chip{border-radius:999px!important;padding:8px 14px!important;border:1px solid #2b3442!important;background:rgba(21,26,34,.75)!important;backdrop-filter:blur(8px);transition:all .18s}
+.nav-chip:hover{border-color:#3d4c63!important}
+.section-title{font-weight:700;letter-spacing:.3px}
+.section-head{border-radius:14px}
+h3{font-weight:700}
+textarea.input,input.input,select.input{border-radius:12px!important}
+/* ===== Ноды по странам ===== */
+.geo-countries{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px}
+.geo-country{position:relative;border:1px solid var(--c-border);border-radius:16px;padding:12px 12px 10px;background:linear-gradient(160deg,rgba(255,255,255,.03),rgba(255,255,255,0) 55%);cursor:pointer;transition:transform .15s,border-color .15s}
+.geo-country:hover{transform:translateY(-2px);border-color:#3d4c63}
+.geo-country.open{border-color:rgba(79,140,255,.6)}
+.geo-flag{font-size:36px;line-height:1;margin-bottom:6px;filter:drop-shadow(0 3px 6px rgba(0,0,0,.5))}
+.geo-cname{font-size:13.5px;font-weight:700}
+.geo-cmeta{font-size:11.5px;color:var(--c-text-dim,#8b949e);margin-top:2px}
+.geo-nodes{grid-column:1/-1;display:none}
+.geo-country.open + .geo-nodes{display:block}
+.geo-node{display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--c-border);border-radius:12px;margin-top:6px;font-size:13px;background:var(--c-surface2,transparent)}
+.geo-node .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.geo-type{font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;border:1px solid var(--c-border);color:var(--c-text-dim,#8b949e);letter-spacing:.5px}
+.geo-delay{font-size:12px;font-weight:700;min-width:64px;text-align:right}
+.geo-delay.d0{color:var(--c-text-dim,#8b949e)} .geo-delay.d1{color:#3fb950} .geo-delay.d2{color:#d29922} .geo-delay.d3{color:#f85149}
+.geo-pingbtn{padding:5px 12px!important;font-size:12px!important}
+.geo-bar{height:4px;border-radius:4px;background:#222a35;overflow:hidden;margin-top:6px}
+.geo-bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#4f8cff,#3fb950)}
+</style>
 </head>
 <body>
 <div class="shell">
@@ -173,6 +207,14 @@ button:focus-visible,.nav-chip:focus-visible,.control:focus-visible,.switch-labe
   <section class="section collapsed" id="geoSection">
       <div class="section-head" onclick="toggleCard('geoSection')"><div class="section-icon">🌍</div><div class="section-head-text"><h2 class="section-title">Гео-прокси · ChatGPT / Spotify / Notion</h2><p class="section-desc">sing-box без TUN: только домены списка, лучшая нода по пингу на текущей сети. Рунет и DPI-обход не затрагиваются.</p></div><span class="collapse-chevron" aria-hidden="true">▾</span></div>
       <div class="section-body">
+      <div class="card" id="gNodesCard">
+        <h3>🏳 Ноды по странам</h3>
+        <div class="geo-actions" style="margin-top:0;margin-bottom:10px">
+          <button type="button" class="md-button tonal" id="gNodesLoad" onclick="geoNodesLoad()">Загрузить ноды</button>
+          <button type="button" class="md-button outlined" id="gPingAll" onclick="geoPingAll()">Пропинговать все</button>
+        </div>
+        <div class="geo-countries" id="gCountries"><div style="grid-column:1/-1;color:var(--c-text-dim,#8b949e);font-size:13px;padding:6px 2px">Нажмите «Загрузить ноды» — покажу страны, флаги и пинг каждой ноды.</div></div>
+      </div>
       <div class="card">
         <div class="geo-pills">
           <span class="geo-pill" id="gPillState">Служба: —</span>
@@ -1385,6 +1427,89 @@ document.querySelectorAll('#gModeSeg button').forEach(b=>b.onclick=()=>{geoModeC
 document.querySelector('.nav-chip[data-target="geoSection"]')?.addEventListener('click',()=>setTimeout(()=>{if(!byId('geoSection')?.classList.contains('collapsed'))geoLoadAll()},250));
 if(!byId('geoSection')?.classList.contains('collapsed'))geoLoadAll();else{geoLoad(true)}
 setInterval(()=>{if(!byId('geoSection')?.classList.contains('collapsed')){geoLoad(true)}},30000);
+
+// ---------- страны и пинг ----------
+const GEO_CC={netherlands:'NL',germany:'DE',france:'FR',finland:'FI',sweden:'SE',norway:'NO',denmark:'DK',estonia:'EE',latvia:'LV',lithuania:'LT',poland:'PL',austria:'AT',switzerland:'CH',spain:'ES',italy:'IT',portugal:'PT',ireland:'IE',uk:'GB','united kingdom':'GB',england:'GB',belgium:'BE',luxembourg:'LU',czech:'CZ',romania:'RO',bulgaria:'BG',moldova:'MD',ukraine:'UA',turkey:'TR',greece:'GR',cyprus:'CY',israel:'IL',emirates:'AE',dubai:'AE',kazakhstan:'KZ',armenia:'AM',georgia:'GE',usa:'US','united states':'US','usa 1':'US',canada:'CA',brazil:'BR',mexico:'MX',singapore:'SG',japan:'JP',korea:'KR','hong kong':'HK',taiwan:'TW',china:'CN',india:'IN',indonesia:'ID',vietnam:'VN',thailand:'TH',australia:'AU',russia:'RU',serbia:'RS',hungary:'HU',slovakia:'SK',croatia:'HR',slovenia:'SI',iceland:'IS',malta:'MT',monaco:'MC',andorra:'AD',liechtenstein:'LI',philippines:'PH',malaysia:'MY',chile:'CL',argentina:'AR',colombia:'CO',south africa:'ZA',nigeria:'NG',kenya:'KE',egypt:'EG',morocco:'MA',azerbaijan:'AZ',uzbekistan:'UZ',kyrgyzstan:'KG',belarus:'BY'};
+function geoCodeToFlag(cc){return String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65))}
+function geoFlagInfo(name){
+  const raw=String(name||'');
+  const m=raw.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);
+  if(m)return{flag:m[0],country:raw.replace(m[0],'').replace(/[\u{1F1E6}-\u{1F1FF}]/gu,'').trim()||'—'};
+  const low=raw.toLowerCase();
+  for(const k in GEO_CC){if(low.includes(k))return{flag:geoCodeToFlag(GEO_CC[k]),country:raw.trim()||k}}
+  return{flag:'\u{1F310}',country:raw.trim()||'Другое'}
+}
+let geoNodesData=[],geoCountryOpen=-1;
+async function geoNodesLoad(){
+  await busy('gNodesLoad','Читаю ноды и задержки…');
+  try{
+    geoNodesData=await geoJ('nodes');
+    done('gNodesLoad','Загружено нод: '+geoNodesData.length);
+    geoRenderCountries();
+  }catch(e){done('gNodesLoad','Ошибка: '+e.message)}
+}
+function geoRenderCountries(){
+  const box=byId('gCountries');if(!box)return;
+  if(!geoNodesData.length){box.innerHTML='<div style="grid-column:1/-1;color:var(--c-text-dim,#8b949e);font-size:13px;padding:6px 2px">Нод нет: включите гео-прокси или добавьте подписки.</div>';return}
+  const groups=new Map();
+  geoNodesData.forEach(n=>{
+    const fi=geoFlagInfo(n.name);
+    const key=fi.flag+'|'+fi.country;
+    if(!groups.has(key))groups.set(key,{flag:fi.flag,country:fi.country,nodes:[]});
+    groups.get(key).nodes.push(n);
+  });
+  const arr=[...groups.values()].sort((a,b)=>b.nodes.length-a.nodes.length);
+  let html='';
+  arr.forEach((g,gi)=>{
+    const alive=g.nodes.filter(n=>n.alive).length;
+    const delays=g.nodes.map(n=>n.delay).filter(d=>d>0);
+    const best=delays.length?Math.min(...delays):0;
+    html+='<div class="geo-country'+(geoCountryOpen===gi?' open':'')+'" onclick="geoToggleCountry('+gi+')">'
+      +'<div class="geo-flag">'+g.flag+'</div>'
+      +'<div class="geo-cname">'+geoEsc(g.country)+'</div>'
+      +'<div class="geo-cmeta">'+g.nodes.length+' нод · живых '+alive+(best?' · лучший '+best+' мс':'')+'</div>'
+      +'<div class="geo-bar"><i style="width:'+(best?(Math.max(8,100-Math.min(95,best/8))+'%'):'8%')+'"></i></div>'
+      +'</div>'
+      +'<div class="geo-nodes">'+g.nodes.map(n=>geoNodeRow(n)).join('')+'</div>';
+  });
+  box.innerHTML=html;
+}
+function geoNodeRow(n){
+  const d=n.delay>0?n.delay+' мс':'—';
+  const cls=n.delay>0?(n.delay<150?'d1':(n.delay<400?'d2':'d3')):'d0';
+  return '<div class="geo-node">'
+    +'<span class="geo-type">'+String(n.type||'').toUpperCase().slice(0,8)+'</span>'
+    +'<span class="nm" title="'+geoEsc(n.server)+'">'+geoEsc(n.name)+'</span>'
+    +'<span class="geo-delay '+cls+'" id="gd-'+n.tag+'">'+d+'</span>'
+    +'<button type="button" class="md-button outlined geo-pingbtn" onclick="geoPingOne(\''+n.tag+'\')">Пинг</button>'
+    +'</div>';
+}
+function geoEsc(v){return String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function geoToggleCountry(gi){geoCountryOpen=(geoCountryOpen===gi?-1:gi);geoRenderCountries()}
+async function geoPingOne(tag){
+  const el=byId('gd-'+tag);if(el)el.textContent='…';
+  try{
+    const r=await geoJ('ping',tag);
+    const d=Number(r.delay)||0;
+    if(el){el.textContent=d>0?(d+' мс'):'нет';el.className='geo-delay '+(d>0?(d<150?'d1':(d<400?'d2':'d3')):'d3')}
+  }catch(e){if(el){el.textContent='ошибка';el.className='geo-delay d3'}}
+}
+async function geoPingAll(){
+  if(!geoNodesData.length){toast('Сначала загрузите ноды');return}
+  await busy('gPingAll','Пингую все ноды…');
+  const tags=geoNodesData.map(n=>n.tag);
+  let done_cnt=0;
+  const worker=async()=>{
+    while(tags.length){
+      const t=tags.shift();
+      try{const r=await geoJ('ping',t);const el=byId('gd-'+t);if(el){const d=Number(r.delay)||0;el.textContent=d>0?(d+' мс'):'нет';el.className='geo-delay '+(d>0?(d<150?'d1':(d<400?'d2':'d3')):'d3')}}catch(_){}
+      done_cnt++;
+    }
+  };
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  done('gPingAll','Пропинговано: '+done_cnt);
+}
+
 // ============================ конец гео-прокси ============================
 </script>
 </body></html>

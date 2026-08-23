@@ -224,7 +224,7 @@ su -c zapret2-control diag
 
 ---
 
-# 🌐 Zapret2 Ultimate by handsgod (v5.0.1)
+# 🌐 Zapret2 Ultimate by handsgod (v5.1.0)
 
 **Два движка в одном модуле:**
 

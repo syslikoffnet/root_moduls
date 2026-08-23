@@ -176,6 +176,63 @@ cmd_toggle() {
 
 cmd_log() { tail -n "${2:-80}" "$LOG" 2>/dev/null; }
 
+# ------------------------------------------------------------------------------
+# Ноды текущего набора + задержки из Clash-API (история urltest).
+# ------------------------------------------------------------------------------
+CLASH_URL=http://127.0.0.1:9090
+clash_curl() {
+  local zc=/data/adb/modules/zapret2-android/bin/curl sec
+  sec=$(cat "$DATA_DIR/run/clash.secret" 2>/dev/null)
+  [ -x "$zc" ] && [ -n "$sec" ] || return 1
+  CURL_CA_BUNDLE=/data/adb/modules/zapret2-android/bin/curl-cacert.pem \
+    "$zc" -s -m 4 -H "Authorization: Bearer $sec" "$@" 2>/dev/null
+}
+
+geo_jesc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+cmd_nodes() {
+  local cfg="$DATA_DIR/run/singbox/config.json" out="[" first=1 tag uri frag srv sch
+  [ -s "$cfg" ] || { echo '[]'; return 0; }
+  # порядок тегов = порядок нод в конфиге; метаданные берём из кэша того же класса
+  local cls
+  cls=$(sh "$MODDIR/geo/service.sh" class 2>/dev/null); [ -n "$cls" ] || cls=all
+  local cache
+  cache=$(sh "$MODDIR/geo/service.sh" nodes-of-class "$cls" 2>/dev/null)
+  local i=0
+  for tag in $(grep -o '"tag":"node_[0-9]*"' "$cfg" | sed 's/.*node_/node_/;s/"//' | sort -t_ -k2 -n); do
+    i=$((i + 1))
+    uri=$(printf '%s\n' "$cache" | sed -n "${i}p")
+    frag=$(printf '%s' "$uri" | sed -n 's/.*#//p' | awk 'BEGIN{for(x=0;x<256;x++)h[sprintf("%02x",x)]=x}{gsub(/\+/," ");o="";s=$0;while(match(s,/%[0-9a-fA-F][0-9a-fA-F]/)){o=o substr(s,1,RSTART-1) sprintf("%c",h[tolower(substr(s,RSTART+1,2))]);s=substr(s,RSTART+3)}printf "%s",o s}')
+    srv=$(printf '%s' "$uri" | sed -n 's/^[^@]*@\([^:?/]*\).*/\1/p')
+    sch=$(printf '%s' "$uri" | sed 's/:.*//')
+    [ -n "$frag" ] || frag="$srv"
+    local alive=false delay=0 r
+    r=$(clash_curl "$CLASH_URL/proxies/$tag")
+    [ -n "$r" ] || r=$(clash_curl "$CLASH_URL/proxies/$tag")
+    printf '%s' "$r" | grep -q '"alive":true' && alive=true
+    delay=$(printf '%s' "$r" | grep -o '"delay":[0-9]*' | tail -n1 | cut -d: -f2)
+    case "$delay" in ''|*[!0-9]*) delay=0 ;; esac
+    [ "$first" = 1 ] || printf ','
+    first=0
+    printf '{"tag":"%s","name":"%s","server":"%s","type":"%s","alive":%s,"delay":%s}' \
+      "$tag" "$(geo_jesc "$frag")" "$(geo_jesc "$srv")" "${sch:-node}" "$alive" "$delay"
+  done
+  printf ']\n'
+}
+
+# Ручной пинг конкретной ноды: реальный HTTP-тест через неё
+cmd_ping() {
+  local tag="$2" r d
+  case "$tag" in node_[0-9]*) ;; *) echo '{"error":"bad tag"}'; return 1 ;; esac
+  r=$(clash_curl "$CLASH_URL/proxies/$tag/delay?timeout=5000&url=https%3A%2F%2Fcp.cloudflare.com%2Fgenerate_204")
+  d=$(printf '%s' "$r" | sed -n 's/.*"delay":\([0-9]*\).*/\1/p')
+  if [ -n "$d" ] && [ "$d" -gt 0 ] 2>/dev/null; then
+    printf '{"tag":"%s","delay":%s}\n' "$tag" "$d"
+  else
+    printf '{"tag":"%s","delay":0}\n' "$tag"
+  fi
+}
+
 # Страна и IP выхода через прокси (показывается в WebUI)
 cmd_egress() {
   local out cc ip zc=/data/adb/modules/zapret2-android/bin/curl
@@ -205,5 +262,7 @@ case "$1" in
   restart)       spawn_detached "$SERVICE" restart; echo "OK: перезапуск запущен" ;;
   log)           cmd_log "$@" ;;
   egress)        cmd_egress ;;
-  *) echo "Команды: status, egress, subs-get/set, happ-import, domains-get/set, apps-list/set, proxy-get/set, toggle 0|1, update, restart, log" ;;
+  nodes)         cmd_nodes ;;
+  ping)          cmd_ping "$@" ;;
+  *) echo "Команды: status, egress, nodes, ping, subs-get/set, happ-import, domains-get/set, apps-list/set, proxy-get/set, toggle 0|1, update, restart, log" ;;
 esac

@@ -33,7 +33,7 @@ send_response() {
 is_read_action() {
   case "$1" in
     status|json-status|json-hotspot-settings|json-strategies|json-diagnostics|json-warp-status|json-hostlist|json-learned|module-version|auto-status|log|nfqws-log) return 0 ;;
-    geo-status|geo-subs-get|geo-domains-get|geo-apps-list|geo-proxy-get|geo-log|geo-egress) return 0 ;;
+    geo-status|geo-subs-get|geo-domains-get|geo-apps-list|geo-proxy-get|geo-log|geo-egress|geo-nodes|geo-ping) return 0 ;;
     *) return 1 ;;
   esac
 }

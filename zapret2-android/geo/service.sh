@@ -400,6 +400,16 @@ build_trojan() {
   return 0
 }
 
+# Секрет Clash-API (ручной пинг нод из WebUI). Один раз генерируется.
+clash_secret() {
+  local f="$RUN/clash.secret" sec
+  if [ -s "$f" ]; then cat "$f" 2>/dev/null; return 0; fi
+  sec=$(tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 24)
+  [ "${#sec}" -ge 16 ] || sec="geo$RANDOM$RANDOM$RANDOM$RANDOM"
+  printf '%s' "$sec" > "$f" 2>/dev/null && chmod 0600 "$f" 2>/dev/null
+  printf '%s' "$sec"
+}
+
 # ------------------------------------------------------------------------------
 # Сборка конфига sing-box: manual (одна нода) или auto (urltest-группа).
 # ------------------------------------------------------------------------------
@@ -477,9 +487,19 @@ EOU
     ],
     "final": "direct",
     "auto_detect_interface": true
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": "__CLASH_SECRET__",
+      "default_mode": "rule"
+    }
   }
 }
 EOJ
+  local csec
+  csec=$(clash_secret)
+  sed -i "s/__CLASH_SECRET__/$csec/" "$WORK/config.json" 2>/dev/null
   return 0
 }
 
@@ -577,7 +597,7 @@ apply_rules() {
   # mixed-порт 127.0.0.1:7890 доступен только root-скриптам модуля:
   # без этого любое приложение могло бы пользоваться вашим прокси бесплатно.
   ipt4 -t filter -N "$GEO_GRD" 2>/dev/null
-  ipt4 -t filter -A "$GEO_GRD" -p tcp -d 127.0.0.1 --dport "$MIXED_PORT" -m owner ! --uid-owner 0 -j REJECT
+  ipt4 -t filter -A "$GEO_GRD" -p tcp -d 127.0.0.1 -m multiport --dports "$MIXED_PORT,9090" -m owner ! --uid-owner 0 -j REJECT
   ipt4 -t filter -I OUTPUT 1 -j "$GEO_GRD"
 
   local mark="$MARK_FULL"
@@ -821,5 +841,6 @@ case "${1:-boot}" in
   apply)   apply_rules tproxy || apply_rules redirect ;;
   status)  status ;;
   class)   network_class ;;
+  nodes-of-class) nodes_for_class "$2" ;;
   *) echo "Использование: $0 [start|stop|restart|update|status|apply]"; exit 2 ;;
 esac
