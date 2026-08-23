@@ -35,6 +35,12 @@ if [ ! -f "$DATA_DIR/domains.list" ]; then
   ui_print "- Создан список доменов: $DATA_DIR/domains.list"
 fi
 
+if [ ! -f "$DATA_DIR/subscriptions.list" ]; then
+  cp -f "$MODPATH/subscriptions.list.default" "$DATA_DIR/subscriptions.list" 2>/dev/null
+  chmod 0644 "$DATA_DIR/subscriptions.list" 2>/dev/null
+  ui_print "- Создан файл подписок: $DATA_DIR/subscriptions.list"
+fi
+
 # ---------- ABI ----------
 ABI=$(getprop ro.product.cpu.abi 2>/dev/null); [ -n "$ABI" ] || ABI="$ARCH"
 case "$ABI" in

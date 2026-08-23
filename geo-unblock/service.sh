@@ -1,25 +1,34 @@
 #!/system/bin/sh
 # ==============================================================================
-# geo-unblock — точечный обход гео-блокировок через ваш VLESS/SS прокси.
+# geo-unblock — точечный обход гео-блокировок через VLESS/SS/Hysteria2/Trojan.
 #
-# Архитектура (без TUN-интерфейса):
-#   приложения -> (iptables mangle, порты 80/443, не-root) пометка 0x40000002
-#     * бит 0x40000000: nfqws2 (zapret2) эти пакеты НЕ трогает
-#     * бит 0x2: policy routing -> local table -> TPROXY в sing-box:7893
-#   sing-box по SNI: домен из domains.list -> VLESS/SS прокси (наружу с меткой
-#     0x40000000, минуя nfqws2); всё остальное -> direct-исход (без метки,
-#     nfqws2 применяет обход DPI как обычно).
+# Два режима:
+#   manual — своя ссылка в /data/adb/geo-unblock/proxy.uri (приоритет);
+#   auto   — подписки из /data/adb/geo-unblock/subscriptions.list: модуль сам
+#            скачивает списки нод, разделяет их по классу сети (wifi/mobile/all)
+#            и собирает urltest-группу: sing-box сам меряет задержку каждой
+#            ноды ЧЕРЕЗ ТЕКУЩУЮ сеть и переключается на лучшую. Сменили
+#            WiFi на мобилку — тесты уйдут в новую сеть, выбор пересоберётся.
 #
-# FAIL-OPEN: любая ошибка/сбой прокси -> правила снимаются МГНОВЕННО,
-# весь трафик уходит напрямую; интернет не пропадает ни на секунду.
+# Архитектура (без TUN):
+#   приложения -> (iptables mangle, порты 80/443, не-root) метка 0x40000002
+#     * бит 0x40000000: nfqws2 (zapret2) эти пакеты не трогает; в filter OUTPUT
+#       помеченный трафик принимается раньше QUIC-REJECT zapret2 (нужно для
+#       hysteria2 на UDP/443);
+#     * бит 0x2: policy routing -> local table -> TPROXY в sing-box:7893.
+#   sing-box по SNI: домен из domains.list -> urltest/лучшая нода; остальное ->
+#   direct (без метки -> nfqws2 применяет DPI-обход как обычно).
+#
+# FAIL-OPEN: сбой прокси/нод -> правила снимаются мгновенно, весь трафик
+# прямой. Интернет не пропадает ни на секунду.
 # ==============================================================================
 umask 077
 
 MODDIR="${0%/*}"
 case "$MODDIR" in /*) ;; *) MODDIR="$(cd "$MODDIR" 2>/dev/null && pwd)" ;; esac
 DATA_DIR=/data/adb/geo-unblock
-BIN_CANDIDATES="$DATA_DIR/bin/sing-box $MODDIR/bin/sing-box"
 DOMAINS="$DATA_DIR/domains.list"
+SUBS="$DATA_DIR/subscriptions.list"
 PROXY_URI_FILE="$DATA_DIR/proxy.uri"
 PROXY_JSON_FILE="$DATA_DIR/proxy.outbound.json"
 DISABLE_FLAG="$DATA_DIR/disabled"
@@ -40,6 +49,8 @@ TABLE=2025
 RULE_PREF=30000
 HEALTH_INTERVAL=45
 FAIL_THRESHOLD=2
+MAX_NODES=60
+SUB_REFRESH_SEC=21600
 TEST_URL="https://cp.cloudflare.com/generate_204"
 Z2_CURL=/data/adb/modules/zapret2-android/bin/curl
 Z2_CA=/data/adb/modules/zapret2-android/bin/curl-cacert.pem
@@ -47,6 +58,7 @@ Z2_CA=/data/adb/modules/zapret2-android/bin/curl-cacert.pem
 mkdir -p "$RUN" "$LOG_DIR" "$WORK" 2>/dev/null
 chmod 0700 "$RUN" "$LOG_DIR" "$WORK" 2>/dev/null || true
 [ -f "$DOMAINS" ] || cp -f "$MODDIR/domains.list.default" "$DOMAINS" 2>/dev/null
+[ -f "$SUBS" ] || cp -f "$MODDIR/subscriptions.list.default" "$SUBS" 2>/dev/null
 
 log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 log_i(){ echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*" >> "$LOG"; }
@@ -59,16 +71,103 @@ IP_BIN=$(command -v ip 2>/dev/null); [ -n "$IP_BIN" ] || IP_BIN=/system/bin/ip
 ipt4(){ "$IPT" -w 5 "$@" >/dev/null 2>&1; }
 ipt6(){ [ -x "$IP6T" ] && "$IP6T" -w 5 "$@" >/dev/null 2>&1; }
 
-MODE=""        # tproxy | redirect
+MODE=""          # tproxy | redirect (транспорт правил)
+PROXY_MODE=""    # manual | auto
+NETWORK_CLASS="" # wifi | mobile | all
+NODES_COUNT=0
 CORE_PID=""
 
 write_state() {
-  printf 'STATE=%s\nMODE=%s\nPID=%s\nUPDATED=%s\n' "${1:-unknown}" "${MODE:-none}" "${CORE_PID:-0}" "$(date +%s 2>/dev/null)" > "$STATE_FILE.tmp.$$" 2>/dev/null \
+  printf 'STATE=%s\nMODE=%s\nPROXY=%s\nCLASS=%s\nNODES=%s\nPID=%s\nUPDATED=%s\n' \
+    "${1:-unknown}" "${MODE:-none}" "${PROXY_MODE:-none}" "${NETWORK_CLASS:-none}" \
+    "${NODES_COUNT:-0}" "${CORE_PID:-0}" "$(date +%s 2>/dev/null)" > "$STATE_FILE.tmp.$$" 2>/dev/null \
     && mv -f "$STATE_FILE.tmp.$$" "$STATE_FILE" 2>/dev/null
 }
 
+now_epoch() { date +%s 2>/dev/null || echo 0; }
+
 # ------------------------------------------------------------------------------
-# Транспорт для проверки здоровья: curl из бандла zapret2 или busybox wget.
+# Класс текущей сети: wifi / mobile / all.
+# ------------------------------------------------------------------------------
+network_class() {
+  local dev
+  dev=$("$IP_BIN" -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+  case "$dev" in
+    wlan*|wifi*|swlan*) echo wifi ;;
+    rmnet*|ccmni*|pdp*|wwan*|usb*|rndis*|ncm*) echo mobile ;;
+    *) echo all ;;
+  esac
+}
+
+# ------------------------------------------------------------------------------
+# Скачивание и парсинг подписок.
+# ------------------------------------------------------------------------------
+fetch_url() {
+  if [ -x "$Z2_CURL" ]; then
+    CURL_CA_BUNDLE="$Z2_CA" "$Z2_CURL" -sSL --max-time 60 "$1" 2>/dev/null
+    return
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -sSL --max-time 60 "$1" 2>/dev/null
+    return
+  fi
+  local b
+  for b in "$(command -v busybox 2>/dev/null)" /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do
+    [ -x "$b" ] || continue
+    "$b" wget -q -T 60 -O - "$1" 2>/dev/null && return 0
+    return 1
+  done
+  return 1
+}
+
+extract_uris() {
+  grep -aE '^(vless|ss|hysteria2|trojan)://' 2>/dev/null | tr -d '\r' | awk 'NF && !seen[$0]++'
+}
+
+# Скачивает все подписки и раскладывает ноды по классам в кэш DATA_DIR/nodes-*.list
+refresh_nodes() {
+  local line cls url tmp_all raw count
+  [ -s "$SUBS" ] || { log_i "подписки не настроены ($SUBS)"; return 1; }
+  tmp_all="$WORK/subs.$$"
+  : > "$tmp_all" 2>/dev/null || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "$line" in ''|'#'*) continue ;; esac
+    cls=$(printf '%s' "$line" | awk '{print $1}')
+    url=$(printf '%s' "$line" | awk '{print $2}')
+    case "$cls" in wifi|mobile|all) ;; *) cls=all; url="$line" ;; esac
+    case "$url" in http://*|https://*) ;; *) continue ;; esac
+    raw=$(fetch_url "$url")
+    if [ -n "$raw" ]; then
+      count=$(printf '%s' "$raw" | extract_uris | tee -a "$tmp_all.$cls" | wc -l)
+      log_i "подписка [$cls] $url: нод $count"
+    else
+      log_w "подписка [$cls] $url не скачалась (сохраняю старый кэш)"
+    fi
+  done < "$SUBS"
+  local c total=0
+  for c in wifi mobile all; do
+    if [ -s "$tmp_all.$c" ]; then
+      extract_uris < "$tmp_all.$c" > "$DATA_DIR/nodes-$c.list"
+    fi
+    [ -f "$DATA_DIR/nodes-$c.list" ] || : > "$DATA_DIR/nodes-$c.list"
+    total=$((total + $(wc -l < "$DATA_DIR/nodes-$c.list" 2>/dev/null || echo 0)))
+  done
+  rm -f "$tmp_all" "$tmp_all.wifi" "$tmp_all.mobile" "$tmp_all.all" 2>/dev/null
+  log_i "кэш нод обновлён: всего $total (wifi=$(wc -l < "$DATA_DIR/nodes-wifi.list" 2>/dev/null) mobile=$(wc -l < "$DATA_DIR/nodes-mobile.list" 2>/dev/null) all=$(wc -l < "$DATA_DIR/nodes-all.list" 2>/dev/null))"
+  [ "$total" -gt 0 ]
+}
+
+nodes_for_class() {
+  case "$1" in
+    wifi) cat "$DATA_DIR/nodes-wifi.list" "$DATA_DIR/nodes-all.list" 2>/dev/null ;;
+    mobile) cat "$DATA_DIR/nodes-mobile.list" "$DATA_DIR/nodes-all.list" 2>/dev/null ;;
+    *) cat "$DATA_DIR/nodes-wifi.list" "$DATA_DIR/nodes-mobile.list" "$DATA_DIR/nodes-all.list" 2>/dev/null ;;
+  esac | awk 'NF && !seen[$0]++' | head -n "$MAX_NODES"
+}
+
+# ------------------------------------------------------------------------------
+# Транспорт для проверки здоровья.
 # ------------------------------------------------------------------------------
 http_via_proxy() {
   if [ -x "$Z2_CURL" ]; then
@@ -85,12 +184,12 @@ http_via_proxy() {
 }
 
 # ------------------------------------------------------------------------------
-# JSON-помощники (значения проходят жёсткую валидацию по символам).
+# JSON-помощники.
 # ------------------------------------------------------------------------------
 jesc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 valid_host() { case "$1" in ''|*[!A-Za-z0-9.-]*) return 1 ;; *) return 0 ;; esac; }
 valid_port() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null; }
-valid_uuid() { case "$1" in ''|*[!A-Za-z0-9-]*) return 1 ;; *) return 0 ;; esac; }
+valid_token() { case "$1" in '') return 1 ;; *) return 0 ;; esac; }
 
 b64d() {
   local s="$1" pad
@@ -101,7 +200,6 @@ b64d() {
 }
 
 urld() {
-  # decode %XX портируемо (printf %b в dash не знает \xHH)
   printf '%s' "$1" | awk '
     BEGIN { for (i = 0; i < 256; i++) h[sprintf("%02x", i)] = i }
     {
@@ -116,61 +214,69 @@ urld() {
 }
 
 qparam() {
-  # регистронезависимо: в ссылках встречаются и sni=, и SNI=, и sID=
   printf '%s' "$QUERY" | tr '&' '\n' | awk -v k="$1" 'tolower(substr($0,1,length(k)+1)) == tolower(k)"=" {print substr($0,length(k)+2); exit}'
 }
 
-# Готовый outbound из строки URI. Пишет валидный JSON в $1.
-build_outbound() {
-  local out="$1" uri scheme rest cred host port
-  if [ -s "$PROXY_JSON_FILE" ]; then
-    grep -q '"server"' "$PROXY_JSON_FILE" 2>/dev/null || { log_e "proxy.outbound.json не содержит \"server\""; return 1; }
-    cp -f "$PROXY_JSON_FILE" "$out"
-    return 0
-  fi
-  [ -s "$PROXY_URI_FILE" ] || { log_e "нет $PROXY_URI_FILE и нет $PROXY_JSON_FILE — прокси не настроен"; return 1; }
-  uri=$(head -n1 "$PROXY_URI_FILE" | tr -d '[:space:]')
+# parse_uri <файл-результата> <tag> <uri>
+parse_uri() {
+  local out="$1" tag="$2" uri="$3" scheme rest
   scheme=${uri%%://*}; rest=${uri#*://}
   case "$scheme" in
-    ss)   build_ss "$out" "$rest" ;;
-    vless) build_vless "$out" "$rest" ;;
-    *) log_e "неподдерживаемая схема '$scheme' (нужен vless:// или ss://)"; return 1 ;;
+    vless)      build_vless "$out" "$rest" "$tag" ;;
+    ss)         build_ss "$out" "$rest" "$tag" ;;
+    hysteria2)  build_hys2 "$out" "$rest" "$tag" ;;
+    trojan)     build_trojan "$out" "$rest" "$tag" ;;
+    vmess)      return 1 ;;
+    *) return 1 ;;
   esac
 }
 
+split_hostport() {
+  # $1=hostport -> HOST/PORT; срезает хвостовой '/' (hysteria2://host:443/?..)
+  hostport=${hostport%/}
+  host=${hostport%%:*}; port=${hostport##*:}
+}
+
 build_ss() {
-  local out="$1" rest="$2" body dec method pass hostport host port
+  local out="$1" rest="$2" tag="$3" body dec method pass hostport host port
   body=${rest%%#*}
   if printf '%s' "$body" | grep -q '@'; then
     hostport=${body##*@}
-    dec=$(b64d "${body%%@*}")
+    case "${body%%@*}" in
+      *:*) dec=${body%%@*} ;;                       # SIP002 открытый: method:pass@host:port
+      *) dec=$(b64d "${body%%@*}") ;;               # base64(method:pass)@host:port
+    esac
   else
     dec=$(b64d "$body"); hostport=${dec##*@}; dec=${dec%%@*}
   fi
   method=${dec%%:*}; pass=${dec#*:}
-  host=${hostport%%:*}; port=${hostport##*:}
-  valid_host "$host" && valid_port "$port" || { log_e "ss:// некорректный host/port"; return 1; }
-  case "$method" in ''|*[!A-Za-z0-9-]*) log_e "ss:// некорректный метод"; return 1 ;; esac
-  [ -n "$pass" ] || { log_e "ss:// нет пароля"; return 1; }
+  split_hostport
+  valid_host "$host" && valid_port "$port" || return 1
+  case "$method" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac
+  valid_token "$pass" || return 1
   cat > "$out" <<EOJ
-{"type":"shadowsocks","tag":"proxy","server":"$(jesc "$host")","server_port":$port,"method":"$(jesc "$method")","password":"$(jesc "$pass")","dialer":{"routing_mark":$((0x40000000))}}
+{"type":"shadowsocks","tag":"$tag","server":"$(jesc "$host")","server_port":$port,"method":"$(jesc "$method")","password":"$(jesc "$pass")","dialer":{"routing_mark":1073741824}}
 EOJ
   return 0
 }
 
 build_vless() {
-  local out="$1" rest="$2" uuid hostport host port security sni fp pbk sid trans thost tpath svc flow skipinv
+  local out="$1" rest="$2" tag="$3" uuid hostport host port security sni fp pbk sid trans thost tpath svc flow skipinv
   uuid=${rest%%@*}; hostport=$(printf '%s' "$rest" | sed -n 's/^[^@]*@\([^?]*\).*/\1/p')
   QUERY=$(printf '%s' "$rest" | sed -n 's/^[^?]*?//p' | sed 's/#.*//')
-  host=${hostport%%:*}; port=${hostport##*:}
-  valid_uuid "$uuid" && valid_host "$host" && valid_port "$port" || { log_e "vless:// некорректные uuid/host/port"; return 1; }
+  split_hostport
+  case "$uuid" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac
+  valid_host "$host" && valid_port "$port" || return 1
   security=$(qparam security); sni=$(qparam sni); fp=$(qparam fp)
   pbk=$(qparam pbk); sid=$(qparam sid)
   trans=$(qparam type); [ -n "$trans" ] || trans=tcp
-  thost=$(qparam host); tpath=$(qparam path); svc=$(qparam serviceName)
+  case "$trans" in raw) trans=tcp ;; esac
+  thost=$(qparam host); tpath=$(qparam path)
+  svc=$(qparam serviceName); [ -n "$svc" ] || svc=$(qparam servicename)
   flow=$(qparam flow); skipinv=$(qparam allowInsecure)
+  [ -z "$skipinv" ] && skipinv=$(qparam insecure)
 
-  local j="{\"type\":\"vless\",\"tag\":\"proxy\",\"server\":\"$(jesc "$host")\",\"server_port\":$port,\"uuid\":\"$(jesc "$uuid")\""
+  local j="{\"type\":\"vless\",\"tag\":\"$tag\",\"server\":\"$(jesc "$host")\",\"server_port\":$port,\"uuid\":\"$(jesc "$uuid")\""
   [ -n "$flow" ] && j="$j,\"flow\":\"$(jesc "$flow")\""
   case "$security" in
     tls|reality)
@@ -179,15 +285,15 @@ build_vless() {
       [ "$skipinv" = "1" ] && j="$j,\"insecure\":true"
       if [ -n "$fp" ]; then j="$j,\"utls\":{\"enabled\":true,\"fingerprint\":\"$(jesc "$fp")\"}"; fi
       if [ "$security" = "reality" ]; then
-        [ -n "$pbk" ] || { log_e "vless reality без pbk (public key) — ссылка неполная"; return 1; }
+        [ -n "$pbk" ] || return 1
         j="$j,\"reality\":{\"enabled\":true,\"public_key\":\"$(jesc "$pbk")\""
         [ -n "$sid" ] && j="$j,\"short_id\":\"$(jesc "$sid")\""
         j="$j}"
       fi
       j="$j}"
       ;;
-    none|'') ;;
-    *) log_w "vless: security=$security не распознан — TLS не включаю" ;;
+    none|false|"") ;;
+    *) ;;
   esac
   case "$trans" in
     ws)
@@ -202,21 +308,128 @@ build_vless() {
       j="$j}"
       ;;
     tcp) ;;
-    *) log_w "vless: transport $trans не поддерживается парсером — использую tcp (или proxy.outbound.json)" ;;
+    *) return 1 ;;   # xhttp и прочее — Xray-only
   esac
-  j="$j,\"dialer\":{\"routing_mark\":$((0x40000000))}}"
+  j="$j,\"dialer\":{\"routing_mark\":1073741824}}"
+  printf '%s\n' "$j" > "$out"
+  return 0
+}
+
+build_hys2() {
+  local out="$1" rest="$2" tag="$3" pass hostport host port sni skipinv obfs obfspw j
+  pass=${rest%%@*}; hostport=$(printf '%s' "$rest" | sed -n 's/^[^@]*@\([^?]*\).*/\1/p')
+  QUERY=$(printf '%s' "$rest" | sed -n 's/^[^?]*?//p' | sed 's/#.*//')
+  split_hostport
+  valid_host "$host" && valid_port "$port" || return 1
+  valid_token "$pass" || return 1
+  sni=$(qparam sni); [ -n "$sni" ] || sni="$host"
+  skipinv=$(qparam allowInsecure); [ -z "$skipinv" ] && skipinv=$(qparam insecure)
+  obfs=$(qparam obfs); obfspw=$(qparam obfs-password)
+  j="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"server\":\"$(jesc "$host")\",\"server_port\":$port,\"password\":\"$(jesc "$(urld "$pass")")\""
+  j="$j,\"tls\":{\"enabled\":true,\"server_name\":\"$(jesc "$sni")\",\"alpn\":[\"h3\"]"
+  [ "$skipinv" = "1" ] && j="$j,\"insecure\":true"
+  j="$j}"
+  if [ "$obfs" = "salamander" ] && [ -n "$obfspw" ]; then
+    j="$j,\"obfs\":{\"type\":\"salamander\",\"password\":\"$(jesc "$obfspw")\"}"
+  fi
+  j="$j,\"dialer\":{\"routing_mark\":1073741824}}"
+  printf '%s\n' "$j" > "$out"
+  return 0
+}
+
+build_trojan() {
+  local out="$1" rest="$2" tag="$3" pass hostport host port sni skipinv j trans thost tpath svc
+  pass=$(urld "${rest%%@*}")
+  hostport=$(printf '%s' "$rest" | sed -n 's/^[^@]*@\([^?]*\).*/\1/p')
+  QUERY=$(printf '%s' "$rest" | sed -n 's/^[^?]*?//p' | sed 's/#.*//')
+  split_hostport
+  valid_host "$host" && valid_port "$port" || return 1
+  valid_token "$pass" || return 1
+  sni=$(qparam sni); [ -n "$sni" ] || sni="$host"
+  skipinv=$(qparam allowInsecure); [ -z "$skipinv" ] && skipinv=$(qparam insecure)
+  j="{\"type\":\"trojan\",\"tag\":\"$tag\",\"server\":\"$(jesc "$host")\",\"server_port\":$port,\"password\":\"$(jesc "$pass")\""
+  j="$j,\"tls\":{\"enabled\":true,\"server_name\":\"$(jesc "$sni")\""
+  [ "$skipinv" = "1" ] && j="$j,\"insecure\":true"
+  j="$j}"
+  trans=$(qparam type); case "$trans" in raw) trans=tcp ;; esac
+  case "$trans" in
+    ws)
+      thost=$(qparam host); tpath=$(qparam path)
+      j="$j,\"transport\":{\"type\":\"ws\""
+      [ -n "$tpath" ] && j="$j,\"path\":\"$(jesc "$(urld "$tpath")")\""
+      [ -n "$thost" ] && j="$j,\"headers\":{\"Host\":\"$(jesc "$thost")\"}"
+      j="$j}"
+      ;;
+    grpc)
+      svc=$(qparam serviceName); [ -n "$svc" ] || svc=$(qparam servicename)
+      j="$j,\"transport\":{\"type\":\"grpc\""
+      [ -n "$svc" ] && j="$j,\"service_name\":\"$(jesc "$svc")\""
+      j="$j}"
+      ;;
+  esac
+  j="$j,\"dialer\":{\"routing_mark\":1073741824}}"
   printf '%s\n' "$j" > "$out"
   return 0
 }
 
 # ------------------------------------------------------------------------------
-# Сборка полного конфига sing-box.
+# Сборка конфига sing-box: manual (одна нода) или auto (urltest-группа).
 # ------------------------------------------------------------------------------
 gen_config() {
-  local ob="$WORK/outbound.json" dom_json
-  build_outbound "$ob" || return 1
+  local dom_json outbounds="$WORK/outbounds.json" frag="$WORK/node.json" uri tag
   dom_json=$(grep -vE '^[[:space:]]*(#|$)' "$DOMAINS" 2>/dev/null | sed 's/[[:space:]]//g' | grep -E '^[A-Za-z0-9.-]+$' | sort -u | awk 'BEGIN{s=""} {s=s (s?",":"") "\"" $0 "\""} END{print s}')
-  [ -n "$dom_json" ] || { log_e "domains.list пуст — нечего заворачивать в прокси"; return 1; }
+  [ -n "$dom_json" ] || { log_e "domains.list пуст"; return 1; }
+
+  rm -f "$outbounds"
+  if [ -s "$PROXY_JSON_FILE" ] || [ -s "$PROXY_URI_FILE" ]; then
+    PROXY_MODE=manual
+    NODES_COUNT=1
+    if [ -s "$PROXY_JSON_FILE" ]; then
+      grep -q '"server"' "$PROXY_JSON_FILE" 2>/dev/null || { log_e "proxy.outbound.json без \"server\""; return 1; }
+      { printf '{"tag":"proxy",'; sed 's/^{//' "$PROXY_JSON_FILE"; } > "$outbounds"
+    else
+      parse_uri "$frag" proxy "$(head -n1 "$PROXY_URI_FILE" | tr -d '[:space:]')" || { log_e "proxy.uri не разобралась"; return 1; }
+      cat "$frag" > "$outbounds"
+    fi
+    printf ',\n{"type":"direct","tag":"direct"}\n' >> "$outbounds"
+  else
+    PROXY_MODE=auto
+    NETWORK_CLASS=$(network_class)
+    local nodes i=0 ok_cnt=0 skip_cnt=0 tags=""
+    nodes=$(nodes_for_class "$NETWORK_CLASS")
+    if [ -z "$nodes" ]; then
+      refresh_nodes || true
+      nodes=$(nodes_for_class "$NETWORK_CLASS")
+    fi
+    [ -n "$nodes" ] || { log_e "нет нод для класса '$NETWORK_CLASS' (подписки не скачались?)"; return 1; }
+    while IFS= read -r uri; do
+      [ -n "$uri" ] || continue
+      i=$((i + 1))
+      tag="node_$i"
+      if parse_uri "$frag" "$tag" "$uri"; then
+        [ "$ok_cnt" -gt 0 ] && printf ',\n' >> "$outbounds"
+        cat "$frag" >> "$outbounds"
+        tags="$tags\"$tag\","
+        ok_cnt=$((ok_cnt + 1))
+      else
+        skip_cnt=$((skip_cnt + 1))
+      fi
+    done <<EOU
+$nodes
+EOU
+    [ "$ok_cnt" -gt 0 ] || { log_e "ни одна нода не разобралась ($skip_cnt пропущено)"; return 1; }
+    NODES_COUNT=$ok_cnt
+    [ "$skip_cnt" -gt 0 ] && log_i "нод разобрано $ok_cnt, пропущено $skip_cnt (vmess/xhttp/битые)"
+    tags=${tags%,}
+    {
+      printf '{"type":"urltest","tag":"proxy","outbounds":[%s],"url":"%s","interval":"90s","tolerance":80,"idle_timeout":"5m"},\n' "$tags" "$TEST_URL"
+      cat "$outbounds"
+      printf ',\n{"type":"direct","tag":"direct"}\n'
+    } > "$outbounds.new"
+    mv -f "$outbounds.new" "$outbounds"
+    log_i "режим auto: класс сети '$NETWORK_CLASS', нод в urltest: $ok_cnt"
+  fi
+
   cat > "$WORK/config.json" <<EOJ
 {
   "log": {"level": "warn", "output": "$WORK/singbox.log", "timestamp": true},
@@ -226,8 +439,7 @@ gen_config() {
     {"type": "mixed",    "tag": "mixed-in",    "listen": "127.0.0.1", "listen_port": $MIXED_PORT}
   ],
   "outbounds": [
-    $(cat "$ob"),
-    {"type": "direct", "tag": "direct"}
+    $(cat "$outbounds")
   ],
   "route": {
     "rules": [
@@ -248,21 +460,20 @@ EOJ
 # ------------------------------------------------------------------------------
 find_core() {
   local b
-  for b in $BIN_CANDIDATES; do [ -x "$b" ] && { printf '%s' "$b"; return 0; }; done
+  for b in "$DATA_DIR/bin/sing-box" "$MODDIR/bin/sing-box"; do
+    [ -x "$b" ] && { printf '%s' "$b"; return 0; }
+  done
   return 1
 }
 
-core_alive() {
-  [ -n "$CORE_PID" ] && kill -0 "$CORE_PID" 2>/dev/null
-}
+core_alive() { [ -n "$CORE_PID" ] && kill -0 "$CORE_PID" 2>/dev/null; }
 
 start_core() {
   local core
-  core=$(find_core) || { log_e "sing-box не найден ($DATA_DIR/bin/sing-box) — см. инструкцию в README"; return 1; }
+  core=$(find_core) || { log_e "sing-box не найден ($DATA_DIR/bin/sing-box)"; return 1; }
   gen_config || return 1
   "$core" check -c "$WORK/config.json" >> "$LOG" 2>&1 || {
-    log_e "sing-box check: конфиг невалиден (проверьте proxy.uri / domains.list); детали:"
-    tail -n 5 "$WORK/singbox.log" >> "$LOG" 2>/dev/null
+    log_e "sing-box check: конфиг невалиден:"
     "$core" check -c "$WORK/config.json" 2>&1 | tail -n 3 >> "$LOG"
     return 1
   }
@@ -275,14 +486,13 @@ start_core() {
     CORE_PID=$!
   fi
   echo "$CORE_PID" > "$CORE_PID_FILE"
-  # готовность: прокси-тест через mixed-порт, до 20 секунд
   local n=0
   while [ "$n" -lt 10 ]; do
     core_alive || { log_e "sing-box умер сразу; последние строки:"; tail -n 5 "$WORK/singbox.log" >> "$LOG"; return 1; }
-    http_via_proxy && { log_i "sing-box запущен (PID $CORE_PID) и прокси отвечает"; return 0; }
+    http_via_proxy && { log_i "sing-box запущен (PID $CORE_PID), прокси отвечает"; return 0; }
     sleep 2; n=$((n + 1))
   done
-  log_w "sing-box запущен, но прокси не ответил за 20с (проверьте сервер/ссылку)"
+  log_w "sing-box запущен, но тест через прокси не прошёл за 20с (подождите выбор ноды urltest'ом)"
   return 0
 }
 
@@ -298,7 +508,7 @@ stop_core() {
 }
 
 # ------------------------------------------------------------------------------
-# Правила. FAIL-OPEN: снимаются одной функцией, любые ошибки не фатальны.
+# Правила. FAIL-OPEN.
 # ------------------------------------------------------------------------------
 GEO_OUT=GEO_OUT_CHAIN
 GEO_TPR=GEO_TPROXY_CHAIN
@@ -317,6 +527,9 @@ cleanup_rules() {
   ipt6 -t mangle -F "$GEO_TPR"; ipt6 -t mangle -X "$GEO_TPR"
   ipt6 -t nat -D OUTPUT -j "$GEO_RDR"
   ipt6 -t nat -F "$GEO_RDR"; ipt6 -t nat -X "$GEO_RDR"
+  # разрешение помеченному трафику раньше QUIC-REJECT zapret2 (hysteria2/UDP443)
+  ipt4 -t filter -D OUTPUT -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
+  ipt6 -t filter -D OUTPUT -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
   "$IP_BIN" -4 rule del pref "$RULE_PREF" fwmark "$MARK_TPROXY/$MARK_TPROXY" 2>/dev/null
   "$IP_BIN" -6 rule del pref "$RULE_PREF" fwmark "$MARK_TPROXY/$MARK_TPROXY" 2>/dev/null
   "$IP_BIN" -4 route flush table "$TABLE" 2>/dev/null
@@ -326,7 +539,11 @@ cleanup_rules() {
 
 apply_rules() {
   cleanup_rules
-  # --- общая цепочка пометки: локальные/приватные и WARP не трогаем ---
+  # Пометленный (наш/прокси) трафик принимаем в filter OUTPUT раньше цепочек
+  # zapret2: иначе QUIC-REJECT ронял бы hysteria2-ноды на UDP/443.
+  ipt4 -t filter -I OUTPUT 1 -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
+  ipt6 -t filter -I OUTPUT 1 -m mark --mark "$MARK_SKIP/$MARK_SKIP" -j ACCEPT
+
   local mark="$MARK_FULL"
   [ "$1" = redirect ] && mark="$MARK_SKIP"
   ipt4 -t mangle -N "$GEO_OUT" || return 1
@@ -344,7 +561,6 @@ apply_rules() {
   ipt6 -t mangle -I OUTPUT 1 -j "$GEO_OUT" 2>/dev/null
 
   if [ "$1" = redirect ]; then
-    # --- режим REDIRECT (нет xt_TPROXY): только TCP, nat OUTPUT ---
     ipt4 -t nat -N "$GEO_RDR" || return 1
     ipt4 -t nat -A "$GEO_RDR" -p tcp -m multiport --dports 80,443 -m owner ! --uid-owner 0 -m mark --mark 0 -j REDIRECT --to-port "$REDIRECT_PORT"
     ipt4 -t nat -I OUTPUT 1 -j "$GEO_RDR"
@@ -352,11 +568,10 @@ apply_rules() {
     ipt6 -t nat -A "$GEO_RDR" -p tcp -m multiport --dports 80,443 -m owner ! --uid-owner 0 -m mark --mark 0 -j REDIRECT --to-port "$REDIRECT_PORT" 2>/dev/null
     ipt6 -t nat -I OUTPUT 1 -j "$GEO_RDR" 2>/dev/null
     MODE=redirect
-    log_i "правила применены: режим REDIRECT (TCP) — TPROXY в ядре недоступен"
+    log_i "правила применены: REDIRECT (TCP); TPROXY в ядре недоступен"
     return 0
   fi
 
-  # --- основной режим TPROXY ---
   ipt4 -t mangle -N "$GEO_TPR" || return 1
   if ipt4 -t mangle -A "$GEO_TPR" -i lo -p tcp -m multiport --dports 80,443 -m mark --mark "$MARK_TPROXY/$MARK_TPROXY" -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$MARK_TPROXY/$MARK_TPROXY"; then
     ipt4 -t mangle -I PREROUTING 1 -j "$GEO_TPR"
@@ -368,12 +583,11 @@ apply_rules() {
     "$IP_BIN" -4 rule add pref "$RULE_PREF" fwmark "$MARK_TPROXY/$MARK_TPROXY" table "$TABLE" 2>/dev/null
     "$IP_BIN" -6 rule add pref "$RULE_PREF" fwmark "$MARK_TPROXY/$MARK_TPROXY" table "$TABLE" 2>/dev/null
     MODE=tproxy
-    log_i "правила применены: режим TPROXY (TCP, v4+v6)"
+    log_i "правила применены: TPROXY (TCP, v4+v6), режим=$PROXY_MODE класс=$NETWORK_CLASS нод=$NODES_COUNT"
     return 0
   fi
-  # TPROXY не поддержан — откат на REDIRECT
   ipt4 -t mangle -F "$GEO_TPR" 2>/dev/null; ipt4 -t mangle -X "$GEO_TPR" 2>/dev/null
-  log_w "xt_TPROXY недоступен — переключаюсь на REDIRECT"
+  log_w "xt_TPROXY недоступен — REDIRECT"
   apply_rules redirect
 }
 
@@ -389,74 +603,96 @@ stop_all() {
   rules_present && had_rules=1
   cleanup_rules
   stop_core
-  # не затираем диагностические состояния no-proxy/no-binary при пустом старте
   [ "$had_rules" = 1 ] && write_state stopped
   log_i "остановлен, правила сняты (трафик прямой)"
 }
 
 start_all() {
   [ -f "$DISABLE_FLAG" ] && { log_i "выключен флагом $DISABLE_FLAG"; exit 0; }
-  local core
-  core=$(find_core) || { log_e "sing-box не установлен — модуль в режиме ожидания (см. README)"; write_state "no-binary"; exit 0; }
-  [ -s "$PROXY_URI_FILE" ] || [ -s "$PROXY_JSON_FILE" ] || {
-    log_e "прокси не настроен: положите vless://… или ss://… в $PROXY_URI_FILE (одной строкой)"
+  find_core >/dev/null || { log_e "sing-box не установлен — модуль в режиме ожидания (README)"; write_state "no-binary"; exit 0; }
+  [ -s "$PROXY_URI_FILE" ] || [ -s "$PROXY_JSON_FILE" ] || [ -s "$SUBS" ] || {
+    log_e "прокси не настроен: proxy.uri, proxy.outbound.json или subscriptions.list"
     write_state "no-proxy"
     exit 0
   }
   start_core || { stop_core; write_state "config-error"; exit 1; }
   if ! rules_present; then
-    apply_rules tproxy || apply_rules redirect || { cleanup_rules; write_state "rules-error"; log_e "не удалось применить правила — трафик прямой"; return 1; }
+    apply_rules tproxy || apply_rules redirect || { cleanup_rules; write_state "rules-error"; log_e "правила не применились — трафик прямой"; return 1; }
   fi
   write_state running
 }
 
 watchdog() {
-  local failures=0 last_dom_sig="" dom_sig
+  local failures=0 last_dom_sig="" dom_sig last_class="" cls last_sub=0 now restart_guard=0
   last_dom_sig=$(cksum "$DOMAINS" 2>/dev/null | awk '{print $1}')
-  log_i "watchdog запущен (интервал ${HEALTH_INTERVAL}s, fail-open)"
+  last_class=$(network_class)
+  last_sub=$(now_epoch)
+  restart_guard=$(now_epoch)
+  log_i "watchdog: интервал ${HEALTH_INTERVAL}s, класс сети '$last_class', подписки каждые ${SUB_REFRESH_SEC}s"
   while :; do
     sleep "$HEALTH_INTERVAL"
+    now=$(now_epoch)
+
     dom_sig=$(cksum "$DOMAINS" 2>/dev/null | awk '{print $1}')
     if [ -n "$dom_sig" ] && [ "$dom_sig" != "$last_dom_sig" ]; then
       last_dom_sig="$dom_sig"
-      log_i "domains.list изменён — перечитываю и перезапускаю ядро (трафик на это время прямой)"
+      log_i "domains.list изменён — перечитываю (трафик на это время прямой)"
       cleanup_rules; stop_core
       start_core && { apply_rules tproxy || apply_rules redirect; }
-      write_state running
-      failures=0
+      write_state running; failures=0; restart_guard=$now
       continue
     fi
+
+    cls=$(network_class)
+    if [ -n "$cls" ] && [ "$cls" != "$last_class" ]; then
+      log_i "класс сети сменился '$last_class' -> '$cls': пересобираю набор нод"
+      last_class="$cls"
+      cleanup_rules; stop_core
+      start_core && { apply_rules tproxy || apply_rules redirect; }
+      write_state running; failures=0; restart_guard=$now
+      continue
+    fi
+
+    if [ "$PROXY_MODE" = auto ] && [ $((now - last_sub)) -ge "$SUB_REFRESH_SEC" ]; then
+      last_sub=$now
+      log_i "плановое обновление подписок"
+      refresh_nodes || true
+    fi
+
     if ! core_alive; then
       failures=$((failures + 1))
-      log_w "sing-box не отвечает (нет процесса), попытка $failures"
-      if [ "$failures" -ge "$FAIL_THRESHOLD" ]; then
+      if [ "$failures" -ge "$FAIL_THRESHOLD" ] && [ $((now - restart_guard)) -ge 60 ]; then
+        restart_guard=$now
         rules_present && cleanup_rules
-        stop_core; start_core && { apply_rules tproxy || apply_rules redirect; }
+        stop_core
+        start_core && { apply_rules tproxy || apply_rules redirect; }
         write_state "${CORE_PID:+running}"
         failures=0
       fi
       continue
     fi
+
     if ! rules_present; then
-      log_w "правила исчезли (внешнее вмешательство?) — восстанавливаю"
+      log_w "правила исчезли — восстанавливаю"
       apply_rules tproxy || apply_rules redirect
       write_state running
       continue
     fi
+
     if http_via_proxy; then
       failures=0
       write_state running
     else
       failures=$((failures + 1))
       log_w "прокси не проходит проверку ($failures/$FAIL_THRESHOLD)"
-      if [ "$failures" -ge "$FAIL_THRESHOLD" ]; then
-        # FAIL-OPEN: снимаем правила мгновенно — интернет (прямой) жив
+      if [ "$failures" -ge "$FAIL_THRESHOLD" ] && [ $((now - restart_guard)) -ge 60 ]; then
+        restart_guard=$now
         cleanup_rules
-        log_w "fail-open: маршрутизация в прокси снята, весь трафик прямой; перезапускаю ядро"
+        log_w "fail-open: правила сняты, трафик прямой; перезапускаю ядро"
         stop_core
         start_core && { apply_rules tproxy || apply_rules redirect; write_state running; }
         failures=0
-        write_state "${CORE_PID:+degraded}"
+        [ -n "$CORE_PID" ] || write_state degraded
       fi
     fi
   done
@@ -464,11 +700,13 @@ watchdog() {
 
 status() {
   echo "state=$(sed -n 's/^STATE=//p' "$STATE_FILE" 2>/dev/null | head -n1)"
-  echo "mode=$(sed -n 's/^MODE=//p' "$STATE_FILE" 2>/dev/null | head -n1)"
+  echo "mode=$(sed -n 's/^MODE=//p' "$STATE_FILE" 2>/dev/null | head -n1) proxy=$(sed -n 's/^PROXY=//p' "$STATE_FILE" 2>/dev/null | head -n1)"
+  echo "network_class=$(network_class) (сохранён: $(sed -n 's/^CLASS=//p' "$STATE_FILE" 2>/dev/null | head -n1))"
+  echo "nodes=$(sed -n 's/^NODES=//p' "$STATE_FILE" 2>/dev/null | head -n1) (кэш: wifi=$(wc -l < "$DATA_DIR/nodes-wifi.list" 2>/dev/null || echo 0) mobile=$(wc -l < "$DATA_DIR/nodes-mobile.list" 2>/dev/null || echo 0) all=$(wc -l < "$DATA_DIR/nodes-all.list" 2>/dev/null || echo 0))"
   echo "core_pid=$(cat "$CORE_PID_FILE" 2>/dev/null)"
-  echo "rules_v4=$(ipt4 -t mangle -C OUTPUT -j "$GEO_OUT" 2>/dev/null && echo yes || ipt4 -t nat -C OUTPUT -j "$GEO_RDR" 2>/dev/null && echo yes-redirect || echo no)"
+  echo "rules_v4=$(ipt4 -t mangle -C OUTPUT -j "$GEO_OUT" 2>/dev/null && echo tproxy || { ipt4 -t nat -C OUTPUT -j "$GEO_RDR" 2>/dev/null && echo redirect || echo no; })"
   echo "domains=$(grep -cvE '^[[:space:]]*(#|$)' "$DOMAINS" 2>/dev/null)"
-  echo "proxy=$([ -s "$PROXY_URI_FILE" ] && echo "uri" || { [ -s "$PROXY_JSON_FILE" ] && echo json || echo none; })"
+  echo "subscriptions=$([ -s "$SUBS" ] && echo "$(grep -cvE '^[[:space:]]*(#|$)' "$SUBS")" || echo 0)"
   echo "binary=$(find_core || echo none)"
   echo "health_now=$(http_via_proxy >/dev/null 2>&1 && echo OK || echo FAIL)"
 }
@@ -479,7 +717,7 @@ case "${1:-boot}" in
     trap 'stop_all' EXIT
     n=0
     until [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] || [ "$n" -ge 150 ]; do sleep 2; n=$((n + 1)); done
-    sleep 20   # дать zapret2 первым поставить свои цепочки
+    sleep 20
     start_all
     watchdog
     ;;
@@ -489,12 +727,9 @@ case "${1:-boot}" in
     start_all
     watchdog
     ;;
-  stop)
-    stop_all
-    ;;
-  apply)
-    apply_rules tproxy || apply_rules redirect
-    ;;
-  status) status ;;
-  *) echo "Использование: $0 [start|stop|restart|status|apply]"; exit 2 ;;
+  stop)    stop_all ;;
+  update)  refresh_nodes && echo "OK: кэш обновлён" ;;
+  apply)   apply_rules tproxy || apply_rules redirect ;;
+  status)  status ;;
+  *) echo "Использование: $0 [start|stop|restart|update|status|apply]"; exit 2 ;;
 esac
